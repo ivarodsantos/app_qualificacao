@@ -1,0 +1,8 @@
+streamlit
+altair
+pandas
+numpy
+plotly
+streamlit-folium
+folium
+geopandas
