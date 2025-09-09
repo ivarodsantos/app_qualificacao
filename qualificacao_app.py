@@ -13,10 +13,29 @@ import altair as alt
 from branca.colormap import linear
 from branca.element import MacroElement, Template
 
-# df_qualificacao = pd.read_csv('data/agrupado_cursos_concluidos_em_execucao_sem_sebrae.csv')
+# Configurações iniciais do Streamlit
 st.set_page_config(layout="wide")
+
+# — Fonte global: Space Grotesk —
 st.markdown(
-    "<h1 style='color:#6c91c8; font-weight:800; margin:0'>"
+    """
+    <style>
+    /* carrega a fonte com todos os pesos disponíveis */
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
+    /* aplica globalmente na app */
+    .stApp, .stAppViewContainer, .main, .block-container,
+    h1, h2, h3, h4, h5, h6,
+    p, div, span, label, li, a, button, input, textarea, select {
+      font-family: 'Space Grotesk', sans-serif !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    "<h1 style='color:#6c91c8; font-weight:700; margin:0'>"
     "Qualificação App - Análise de Cursos e Concludentes"
     "</h1>",
     unsafe_allow_html=True,
@@ -59,11 +78,11 @@ def add_binary_legend(m, title="Legenda", label_on="Com qualificação", label_o
                 <b>Legenda</b>
                 <div style="margin-top:6px;">
                     <div style="display:flex; align-items:center; margin-bottom:4px;">
-                        <span style="display:inline-block; width:16px; height:12px; background:#238b45; border:1px solid #333; margin-right:6px;"></span>
+                        <span style="display:inline-block; width:16px; height:12px; background:#a9c772; border:1px solid #333; margin-right:6px;"></span>
                         <span>Com qualificação</span>
                     </div>
                     <div style="display:flex; align-items:center;">
-                        <span style="display:inline-block; width:16px; height:12px; background:#e0e0e0; border:1px solid #333; margin-right:6px;"></span>
+                        <span style="display:inline-block; width:16px; height:12px; background:#f7e350; border:1px solid #333; margin-right:6px;"></span>
                         <span>Sem qualificação</span>
                     </div>
                 </div>
@@ -235,7 +254,8 @@ def compute_kpis(df_qualificacao: pd.DataFrame, geojson_data: dict):
 # =========================
 
 st.markdown(
-    "<h2 style='color:#4a595e; font-weight:800; margin:0'>"
+    "<h2 style='color:#4a595e; font-weight:700; margin:0'>"
+    "<span style='font-size:1.5em; margin-right:8px;'>📊</span>"
     "Panorama do Programa"
     "</h2>",
     unsafe_allow_html=True,
@@ -270,10 +290,18 @@ st.divider()
 g1, g2 = st.columns(2)
 
 with g1:
-    st.markdown("#### Top 10 cursos por concludentes")
+    st.markdown(
+    """
+    <h5 style='display:flex; align-items:center; color:#6c91c8; margin-top:12px;'>
+        <span style='font-size:1.2em; margin-right:6px;'>🎓</span>
+        Top 10 cursos/concludentes
+    </h5>
+    """,
+    unsafe_allow_html=True
+)
     if not top_cursos.empty:
         ch = (alt.Chart(top_cursos)
-                .mark_bar()
+                .mark_bar(color="#cf2e26")
                 .encode(
                     x=alt.X("qtd_concludentes:Q", title="concludentes"),
                     y=alt.Y("CURSO:N", sort="-x", title="Curso"),
@@ -292,10 +320,18 @@ with g1:
         st.info("Dados insuficientes para montar o ranking de cursos (precisa de 'CURSO' e 'qtd_concludentes').")
 
 with g2:
-    st.markdown("#### Top 10 municípios por concludentes")
+    st.markdown(
+    """
+    <h5 style='display:flex; align-items:center; color:#6c91c8; margin-top:12px;'>
+        <span style='font-size:1.2em; margin-right:6px;'>🏙️</span>
+        Top 10 municípios/concludentes
+    </h5>
+    """,
+    unsafe_allow_html=True
+)
     if not top_municipios.empty:
         ch = (alt.Chart(top_municipios)
-                .mark_bar()
+                .mark_bar(color="#cf2e26")
                 .encode(
                     x=alt.X("qtd_concludentes:Q", title="concludentes"),
                     y=alt.Y("Município:N", sort="-x", title="Município"),
@@ -356,7 +392,7 @@ def build_map(geojson_data, camada, df):
     if camada == "Municípios com Qualificação":
         # Binário: 1 = verde, 0/ausente = cinza
         # Legenda categórica:
-        add_binary_legend(m, "Municípios com Qualificação", color_on="#238b45", color_off=grey)
+        add_binary_legend(m, "Municípios com Qualificação", color_on="#a9c772", color_off="#f7e350")
 
     elif camada == "Cursos por Município":
         # Bins fixos (QGIS): 1-5, 5-10, 10-20, 20-max
@@ -393,7 +429,7 @@ def build_map(geojson_data, camada, df):
         v = float(valores.get(nome, 0.0))
 
         if camada == "Municípios com Qualificação":
-            fill = "#238b45" if v >= 1.0 else grey
+            fill = "#a9c772" if v >= 1.0 else "#f7e350"
         else:
             if colormap is None:
                 fill = grey
@@ -474,7 +510,7 @@ def show_municipio_dialog(municipio: str, df_base: pd.DataFrame, camada: str):
 
     st.markdown("#### Concludentes por curso")
     ch1 = (alt.Chart(agg)
-             .mark_bar()
+             .mark_bar(color="#cf2e26")
              .encode(
                  x=alt.X("concludentes:Q", title="Concludentes"),
                  y=alt.Y("CURSO:N", sort="-x", title="Curso"),
@@ -486,7 +522,7 @@ def show_municipio_dialog(municipio: str, df_base: pd.DataFrame, camada: str):
 
     st.markdown("#### Turmas por curso")
     ch2 = (alt.Chart(agg)
-             .mark_bar()
+             .mark_bar(color="#cf2e26")
              .encode(
                  x=alt.X("turmas:Q", title="Turmas"),
                  y=alt.Y("CURSO:N", sort="-x", title="Curso"),
@@ -517,7 +553,15 @@ def show_municipio_dialog(municipio: str, df_base: pd.DataFrame, camada: str):
 
 
 # Mapa
-st.markdown("### Mapa Interativo")
+st.markdown(
+    """
+    <h2 style='display:flex; align-items:center; color:#4a595e; margin-top:18px;'>
+        <span style='font-size:1.5em; margin-right:8px;'>🗺️</span>
+        Mapa Interativo
+    </h2>
+    """,
+    unsafe_allow_html=True
+)
 m, geo = build_map(geojson_data, camada, df_qualificacao)
 st_data = st_folium(
     m,
