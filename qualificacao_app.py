@@ -10,13 +10,18 @@ import copy
 import altair as alt
 
 
-# from branca.colormap import StepColormap
-from branca.colormap import linear, StepColormap
+from branca.colormap import linear
 from branca.element import MacroElement, Template
 
 # df_qualificacao = pd.read_csv('data/agrupado_cursos_concluidos_em_execucao_sem_sebrae.csv')
 st.set_page_config(layout="wide")
-st.title("Qualificação App - Análise de Cursos e Concludentes")
+st.markdown(
+    "<h1 style='color:#6c91c8; font-weight:800; margin:0'>"
+    "Qualificação App - Análise de Cursos e Concludentes"
+    "</h1>",
+    unsafe_allow_html=True,
+)
+
 
 @st.cache_data
 def load_geojson():
@@ -67,6 +72,248 @@ def add_binary_legend(m, title="Legenda", label_on="Com qualificação", label_o
     """
     MacroElement._template = Template(html)
     m.get_root().add_child(MacroElement())
+
+
+@st.cache_data
+def compute_kpis_with_tops(df_qualificacao: pd.DataFrame, geojson_data: dict):
+    # Normalizações básicas
+    df = df_qualificacao.copy()
+    if "Município" in df.columns:
+        df["Município"] = df["Município"].astype(str).str.strip().str.upper()
+    else:
+        df["Município"] = ""
+
+    # total de municípios do CE a partir do GeoJSON
+    try:
+        total_municipios_ce = len({f["properties"]["NM_MUN"].strip().upper()
+                                   for f in geojson_data["features"]})
+    except Exception:
+        total_municipios_ce = None
+
+    # KPIs básicos com segurança de colunas
+    tem = df["Município"].nunique()
+
+    cursos_distintos = df["CURSO"].nunique() if "CURSO" in df.columns else 0
+    total_turmas = int(df.get("qtd_turmas", pd.Series(dtype=float)).fillna(0).sum())
+    total_concludentes= int(df.get("qtd_concludentes", pd.Series(dtype=float)).fillna(0).sum())
+    total_inscritos = float(df.get("qtd_inscritos", pd.Series(dtype=float)).fillna(0).sum())
+    total_vagas = float(df.get("qtd_vagas", pd.Series(dtype=float)).fillna(0).sum())
+
+    # taxas (evitando div/0)
+    taxa_conclusao_inscritos = (total_concludentes/ total_inscritos) if total_inscritos > 0 else None
+    taxa_conclusao_vagas = (total_concludentes/ total_vagas) if total_vagas > 0 else None
+    media_concludentes_por_turma = (total_concludentes/ total_turmas) if total_turmas > 0 else None
+
+    cobertura = (tem / total_municipios_ce) if total_municipios_ce else None
+
+    kpis = dict(
+        municipios_atendidos=tem,
+        total_municipios_ce=total_municipios_ce,
+        cobertura=cobertura,
+        cursos_distintos=cursos_distintos,
+        total_turmas=total_turmas,
+        total_concludentes=total_concludentes,
+        taxa_conclusao_inscritos=taxa_conclusao_inscritos,
+        taxa_conclusao_vagas=taxa_conclusao_vagas,
+        media_concludentes_por_turma=media_concludentes_por_turma,
+    )
+
+    # Rankings (Top N)
+    top_cursos = pd.DataFrame()
+    top_municipios = pd.DataFrame()
+
+    if {"CURSO", "qtd_concludentes"}.issubset(df.columns):
+        top_cursos = (df.groupby("CURSO", as_index=False)["qtd_concludentes"]
+                        .sum().sort_values("qtd_concludentes", ascending=False).head(10))
+
+    if {"Município", "qtd_concludentes"}.issubset(df.columns):
+        top_municipios = (df.groupby("Município", as_index=False)["qtd_concludentes"]
+                            .sum().sort_values("qtd_concludentes", ascending=False).head(10))
+
+    return kpis, top_cursos, top_municipios
+
+
+def fmt_pct(x):
+    return f"{x:.1%}" if x is not None else "—"
+
+
+# Dados
+geojson_raw = load_geojson()
+geojson_data = copy.deepcopy(geojson_raw)  # trabalha numa cópia
+df_qualificacao = load_data()
+kpis, top_cursos, top_municipios = compute_kpis_with_tops(df_qualificacao, geojson_data)
+
+# =========================
+# KPIs gerais do programa (helpers)
+# =========================
+
+import pandas as pd
+
+# Paleta (ajuste se tiver o manual da marca)
+BRAND_GREEN = "#238B45"   # verde principal (mapa)
+BRAND_BLUE  = "#5C7DBD"   # azul da marca (aproximação)
+BG_GREEN    = "#ECF7F0"   # fundo claro esverdeado
+BG_BLUE     = "#EEF2FB"   # fundo claro azulado
+BG_YELLOW  = "#FAF7E9"   # fundo neutro
+BG_RED     = "#FDEDED"   # fundo claro avermelhado
+BG_GRAY    = "#F0F1F1"   # fundo cinza claro
+
+def kpi_card(label: str, value: str, color=BRAND_GREEN, bg=BG_GREEN, help_text: str | None = None):
+    """Card simples para KPI com cor e fundo customizados."""
+    help_html = f'<span title="{help_text}" style="cursor:help; margin-left:6px; color:#64748b;">&#9432;</span>' if help_text else ""
+    st.markdown(
+        f"""
+        <div style="
+            background:{bg};
+            border:1px solid rgba(0,0,0,0.06);
+            border-radius:14px;
+            padding:14px 16px;
+        ">
+          <div style="font-size:0.95rem; color:#334155; margin-bottom:6px; display:flex; align-items:center;">
+            <span>{label}</span>{help_html}
+          </div>
+          <div style="font-size:2.1rem; font-weight:700; color:{color}; line-height:1.1;">
+            {value}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def fmt_int(x):  # 8.046 etc (ponto como separador de milhar)
+    try:
+        return f"{int(x):,}".replace(",", ".")
+    except Exception:
+        return "—"
+
+def fmt_pct(x):
+    return f"{x:.1%}" if (x is not None) else "—"
+
+@st.cache_data
+def compute_kpis(df_qualificacao: pd.DataFrame, geojson_data: dict):
+    """Agrega KPIs a partir da base e do GeoJSON de municípios."""
+    df = df_qualificacao.copy()
+
+    # Normaliza município
+    if "Município" in df.columns:
+        df["Município"] = df["Município"].astype(str).str.strip().str.upper()
+    else:
+        df["Município"] = ""
+
+    # total de municípios do CE a partir do GeoJSON
+    try:
+        total_municipios_ce = len({f["properties"]["NM_MUN"].strip().upper()
+                                   for f in geojson_data["features"]})
+    except Exception:
+        total_municipios_ce = None
+
+    municipios_atendidos = df["Município"].nunique()
+    cursos_distintos = df["CURSO"].nunique() if "CURSO" in df.columns else 0
+    total_turmas = int(df.get("qtd_turmas", pd.Series(dtype=float)).fillna(0).sum())
+    total_concluintes = int(df.get("qtd_concludentes", pd.Series(dtype=float)).fillna(0).sum())
+    total_inscritos = float(df.get("qtd_inscritos", pd.Series(dtype=float)).fillna(0).sum())
+    total_vagas = float(df.get("qtd_vagas", pd.Series(dtype=float)).fillna(0).sum())
+
+    cobertura = (municipios_atendidos / total_municipios_ce) if total_municipios_ce else None
+    taxa_conclusao_inscritos = (total_concluintes / total_inscritos) if total_inscritos > 0 else None
+    media_concluintes_por_turma = (total_concluintes / total_turmas) if total_turmas > 0 else None
+
+    return {
+        "municipios_atendidos": municipios_atendidos,
+        "total_municipios_ce": total_municipios_ce,
+        "cursos_distintos": cursos_distintos,
+        "total_turmas": total_turmas,
+        "total_concluintes": total_concluintes,
+        "cobertura": cobertura,
+        "taxa_conclusao_inscritos": taxa_conclusao_inscritos,
+        "media_concluintes_por_turma": media_concluintes_por_turma,
+    }
+
+
+# =========================
+# HOME: Panorama do Programa
+# =========================
+
+st.markdown(
+    "<h2 style='color:#4a595e; font-weight:800; margin:0'>"
+    "Panorama do Programa"
+    "</h2>",
+    unsafe_allow_html=True,
+)
+
+kpis = compute_kpis(df_qualificacao, geojson_data)
+
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    kpi_card("Municípios atendidos", fmt_int(kpis["municipios_atendidos"]))
+with c2:
+    cov_help = (f"{kpis['municipios_atendidos']}/{kpis['total_municipios_ce']} municípios do CE") if kpis["total_municipios_ce"] else None
+    kpi_card("Cobertura no CE", fmt_pct(kpis["cobertura"]), color=BRAND_BLUE, bg=BG_BLUE, help_text=cov_help)
+with c3:
+    kpi_card("Qtd de Cursos", fmt_int(kpis["cursos_distintos"]), color="#f7e350", bg=BG_YELLOW)
+with c4:
+    kpi_card("Total de concludentes", fmt_int(kpis["total_concluintes"]), color= "#4a595e", bg=BG_GRAY)
+
+# <<< inserindo espaçamento entre linhas >>>
+st.markdown("<div style='margin-top:18px;'></div>", unsafe_allow_html=True)
+
+c5, c6 = st.columns(2)
+with c5:
+    kpi_card("Total de turmas", fmt_int(kpis["total_turmas"]), color="#cf2e26", bg=BG_RED)
+with c6:
+    med = f"{kpis['media_concluintes_por_turma']:.1f}" if kpis["media_concluintes_por_turma"] else "—"
+    kpi_card("Média de concludentes por turma", med, color=BRAND_GREEN, bg=BG_GREEN)
+
+st.divider()
+
+# Gráficos (2 colunas)
+g1, g2 = st.columns(2)
+
+with g1:
+    st.markdown("#### Top 10 cursos por concludentes")
+    if not top_cursos.empty:
+        ch = (alt.Chart(top_cursos)
+                .mark_bar()
+                .encode(
+                    x=alt.X("qtd_concludentes:Q", title="concludentes"),
+                    y=alt.Y("CURSO:N", sort="-x", title="Curso"),
+                    tooltip=["CURSO", alt.Tooltip("qtd_concludentes:Q", title="concludentes")]
+                )
+                .properties(height=420))
+        st.altair_chart(ch, use_container_width=True)
+        # Download
+        st.download_button(
+            "Baixar Top 10 cursos (CSV)",
+            data=top_cursos.to_csv(index=False).encode("utf-8"),
+            file_name="top10_cursos_concludentes.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("Dados insuficientes para montar o ranking de cursos (precisa de 'CURSO' e 'qtd_concludentes').")
+
+with g2:
+    st.markdown("#### Top 10 municípios por concludentes")
+    if not top_municipios.empty:
+        ch = (alt.Chart(top_municipios)
+                .mark_bar()
+                .encode(
+                    x=alt.X("qtd_concludentes:Q", title="concludentes"),
+                    y=alt.Y("Município:N", sort="-x", title="Município"),
+                    tooltip=["Município", alt.Tooltip("qtd_concludentes:Q", title="concludentes")]
+                )
+                .properties(height=420))
+        st.altair_chart(ch, use_container_width=True)
+        st.download_button(
+            "Baixar Top 10 municípios (CSV)",
+            data=top_municipios.to_csv(index=False).encode("utf-8"),
+            file_name="top10_municipios_concludentes.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("Dados insuficientes para montar o ranking de municípios (precisa de 'Município' e 'qtd_concludentes').")
+
+st.divider()
+
 
 
 def build_map(geojson_data, camada, df):
@@ -187,16 +434,14 @@ st.sidebar.image('icons/neg_color.png', use_container_width=True)
 camada = st.sidebar.radio("Selecione a camada:", 
                           ["Municípios com Qualificação", "Cursos por Município", "Concludentes por Município", "Turmas por Município"])
 
-# Dados
-geojson_raw = load_geojson()
-geojson_data = copy.deepcopy(geojson_raw)  # trabalha numa cópia
+
 
 # GeoDataFrame para lookup ponto-em-polígono (EPSG:4326)
 gdf_muns = gpd.GeoDataFrame.from_features(geojson_raw, crs="EPSG:4326")[["NM_MUN", "geometry"]]
 # índice espacial para acelerar
 _ = gdf_muns.sindex
 
-df_qualificacao = load_data()
+
 
 
 df_municipios_unicos = df_qualificacao['Município'].unique()
@@ -217,7 +462,7 @@ def show_municipio_dialog(municipio: str, df_base: pd.DataFrame, camada: str):
     c1, c2, c3 = st.columns(3)
     c1.metric("Cursos distintos", df_mun["CURSO"].nunique())
     c2.metric("Total de turmas", int(df_mun["qtd_turmas"].sum()))
-    c3.metric("Total de concluintes", int(df_mun["qtd_concludentes"].sum()))
+    c3.metric("Total de concludentes", int(df_mun["qtd_concludentes"].sum()))
 
     # Agregações por curso
     agg = (df_mun.groupby("CURSO", as_index=False)
@@ -312,7 +557,7 @@ if evt and isinstance(evt, dict):
 
 # st.write("DEBUG - Município resolvido:", mun, " | Valor:", valor)
 
-if mun and mun != st.session_state.mun_clicked:
+if mun and mun != st.session_state.mun_clicked: 
     st.session_state.mun_clicked = mun
     st.toast(f"Município: {mun}" + (f" — {camada}: {valor}" if valor is not None else ""), icon="✅")
     show_municipio_dialog(mun, df_qualificacao, camada)
