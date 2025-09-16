@@ -312,7 +312,7 @@ with g1:
         # Download
         st.download_button(
             "Baixar Top 10 cursos (CSV)",
-            data=top_cursos.to_csv(index=False).encode("utf-8"),
+            data=top_cursos.to_csv(index=False).encode("latin-1"),
             file_name="top10_cursos_concludentes.csv",
             mime="text/csv"
         )
@@ -341,7 +341,7 @@ with g2:
         st.altair_chart(ch, use_container_width=True)
         st.download_button(
             "Baixar Top 10 municípios (CSV)",
-            data=top_municipios.to_csv(index=False).encode("utf-8"),
+            data=top_municipios.to_csv(index=False).encode("latin-1"),
             file_name="top10_municipios_concludentes.csv",
             mime="text/csv"
         )
@@ -538,7 +538,7 @@ def show_municipio_dialog(municipio: str, df_base: pd.DataFrame, camada: str):
     st.dataframe(df_mun[cols], use_container_width=True)
 
     # Download do recorte
-    csv_bytes = df_mun[cols].to_csv(index=False).encode("utf-8")
+    csv_bytes = df_mun[cols].to_csv(index=False).encode("latin-1")
     st.download_button(
         "Baixar CSV do município",
         data=csv_bytes,
@@ -562,13 +562,48 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-m, geo = build_map(geojson_data, camada, df_qualificacao)
+# ---- Filtros acima do mapa ----
+with st.container():
+    colf1, colf2 = st.columns([3, 1])
+    with colf1:
+        cursos_opcoes = sorted(
+            df_qualificacao["CURSO"].dropna().astype(str).unique().tolist()
+        )
+        cursos_sel = st.multiselect(
+            "Filtrar por curso",
+            options=cursos_opcoes,
+            placeholder="Selecione um ou mais cursos…",
+            key="filtro_cursos_mapa",
+        )
+    with colf2:
+        # botões utilitários (opcionais)
+        st.write("")
+        limpar = st.button("Limpar filtros")
+        if limpar:
+            st.session_state["filtro_cursos_mapa"] = []
+            cursos_sel = []
+
+# aplica filtro
+df_filtrado = (
+    df_qualificacao if not cursos_sel
+    else df_qualificacao[df_qualificacao["CURSO"].isin(cursos_sel)]
+)
+
+# dica rápida de contexto do filtro
+if cursos_sel:
+    st.caption(
+        f"Filtro ativo: {len(cursos_sel)} curso(s) | "
+        f"Municípios com oferta: {df_filtrado['Município'].nunique()}"
+    )
+
+# constrói o mapa com a base (filtrada ou não)
+m, geo = build_map(geojson_data, camada, df_filtrado)
 st_data = st_folium(
     m,
     width="100%",
     height=600,
     use_container_width=True,
-    returned_objects=["last_object_clicked"], # para evitar reruns desnecess
+    returned_objects=["last_object_clicked"], # para evitar reruns desnecessários
     feature_group_to_add=[geo]
 )
 
