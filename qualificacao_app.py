@@ -247,6 +247,93 @@ def compute_kpis(df_qualificacao: pd.DataFrame, geojson_data: dict):
         "taxa_conclusao_inscritos": taxa_conclusao_inscritos,
         "media_concluintes_por_turma": media_concluintes_por_turma,
     }
+    
+
+
+# --- Fragmento: mapa + filtros ---
+@st.fragment
+def mapa_fragment(geojson_data, camada_atual, df_base):
+    # cabeçalho
+    st.markdown(
+        """
+        <h2 style='display:flex; align-items:center; color:#4a595e; margin-top:18px;'>
+            <span style='font-size:1.5em; margin-right:8px;'>🗺️</span>
+            Mapa Interativo
+        </h2>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # --- filtros em formulário (evita rerun a cada clique) ---
+    with st.form("filtros_mapa", clear_on_submit=False):
+        colf1, colf2 = st.columns([3, 1])
+        with colf1:
+            cursos_opcoes = sorted(df_base["CURSO"].dropna().astype(str).unique().tolist())
+            cursos_sel = st.multiselect(
+                "Filtrar por curso",
+                options=cursos_opcoes,
+                default=st.session_state.get("cursos_sel_mapa", []),
+                placeholder="Selecione um ou mais cursos…",
+            )
+        with colf2:
+            st.write("")
+            aplicar = st.form_submit_button("Aplicar", use_container_width=True)
+
+    # persiste/recupera seleção
+    if aplicar:
+        st.session_state.cursos_sel_mapa = cursos_sel
+    cursos_atuais = st.session_state.get("cursos_sel_mapa", [])
+
+    # aplica filtro
+    df_filtrado = (
+        df_base if not cursos_atuais
+        else df_base[df_base["CURSO"].isin(cursos_atuais)]
+    )
+
+    if cursos_atuais:
+        st.caption(
+            f"Filtro ativo: {len(cursos_atuais)} curso(s) • "
+            f"Municípios com oferta: {df_filtrado['Município'].nunique()}"
+        )
+
+    # constrói o mapa com a base (filtrada ou não)
+    m, geo = build_map(geojson_data, camada_atual, df_filtrado)
+
+    st_data = st_folium(
+        m,
+        width="100%",
+        height=600,
+        use_container_width=True,
+        # mantém somente clique, evitando reruns por zoom/pan
+        returned_objects=["last_object_clicked"],
+        feature_group_to_add=[geo],
+    )
+
+        # --- clique no mapa -> abre modal com base FILTRADA ---
+    if "mun_clicked" not in st.session_state:
+        st.session_state.mun_clicked = None
+
+    evt = (st_data or {}).get("last_object_clicked")
+    mun = None
+
+    if evt and isinstance(evt, dict):
+        # 1) tenta pegar das properties (se vierem)
+        props = evt.get("properties") if "properties" in evt else {}
+        mun = (props or {}).get("NM_MUN")
+
+        # 2) fallback: ponto-em-polígono quando só vem lat/lng
+        if not mun and ("lat" in evt and "lng" in evt):
+            # pequena tolerância para cliques na borda (~10m)
+            pt = gpd.points_from_xy([evt["lng"]], [evt["lat"]], crs="EPSG:4326")[0]
+            poly = gdf_muns[gdf_muns.intersects(pt.buffer(0.0001))]
+            if not poly.empty:
+                mun = str(poly.iloc[0]["NM_MUN"]).strip().upper()
+
+    if mun and mun != st.session_state.mun_clicked:
+        st.session_state.mun_clicked = mun
+        show_municipio_dialog(mun, df_filtrado, camada_atual)
+
+
 
 
 # =========================
@@ -459,10 +546,7 @@ def build_map(geojson_data, camada, df):
         popup_keep_highlighted=True,
     )
     geo.add_to(m)
-
-
     return m, geo
-
 
 
 # Sidebar
@@ -477,9 +561,7 @@ gdf_muns = gpd.GeoDataFrame.from_features(geojson_raw, crs="EPSG:4326")[["NM_MUN
 # índice espacial para acelerar
 _ = gdf_muns.sindex
 
-
-
-
+# Dados auxiliares
 df_municipios_unicos = df_qualificacao['Município'].unique()
 df_lotes_unicos = df_qualificacao['Nº LOTE'].unique()
 
@@ -487,6 +569,9 @@ qtd_cursos_por_municipio = df_qualificacao['Município'].value_counts()
 qtd_concludentes_por_municipio = df_qualificacao.groupby('Município')['qtd_concludentes'].sum().reset_index()
 qtd_turmas_por_municipio = df_qualificacao.groupby('Município')['qtd_turmas'].sum().reset_index().sort_values(by='qtd_turmas', ascending=False)
 
+
+# =========================
+# Modal de detalhes do município   
 @st.dialog("Detalhes do Município", width="large")
 def show_municipio_dialog(municipio: str, df_base: pd.DataFrame, camada: str):
     # filtra base (seu df_qualificacao já está normalizado em UPPER)
@@ -552,94 +637,8 @@ def show_municipio_dialog(municipio: str, df_base: pd.DataFrame, camada: str):
         st.rerun()
 
 
-# Mapa
-st.markdown(
-    """
-    <h2 style='display:flex; align-items:center; color:#4a595e; margin-top:18px;'>
-        <span style='font-size:1.5em; margin-right:8px;'>🗺️</span>
-        Mapa Interativo
-    </h2>
-    """,
-    unsafe_allow_html=True
-)
-# ---- Filtros acima do mapa ----
-with st.container():
-    colf1, colf2 = st.columns([3, 1])
-    with colf1:
-        cursos_opcoes = sorted(
-            df_qualificacao["CURSO"].dropna().astype(str).unique().tolist()
-        )
-        cursos_sel = st.multiselect(
-            "Filtrar por curso",
-            options=cursos_opcoes,
-            placeholder="Selecione um ou mais cursos…",
-            key="filtro_cursos_mapa",
-        )
-    with colf2:
-        # botões utilitários (opcionais)
-        st.write("")
-        limpar = st.button("Limpar filtros")
-        if limpar:
-            st.session_state["filtro_cursos_mapa"] = []
-            cursos_sel = []
-
-# aplica filtro
-df_filtrado = (
-    df_qualificacao if not cursos_sel
-    else df_qualificacao[df_qualificacao["CURSO"].isin(cursos_sel)]
-)
-
-# dica rápida de contexto do filtro
-if cursos_sel:
-    st.caption(
-        f"Filtro ativo: {len(cursos_sel)} curso(s) | "
-        f"Municípios com oferta: {df_filtrado['Município'].nunique()}"
-    )
-
-# constrói o mapa com a base (filtrada ou não)
-m, geo = build_map(geojson_data, camada, df_filtrado)
-st_data = st_folium(
-    m,
-    width="100%",
-    height=600,
-    use_container_width=True,
-    returned_objects=["last_object_clicked"], # para evitar reruns desnecessários
-    feature_group_to_add=[geo]
-)
-
 # ---- captura do clique ----
 if "mun_clicked" not in st.session_state:
     st.session_state.mun_clicked = None
 
-evt = (st_data or {}).get("last_object_clicked")
-# st.write("DEBUG - Retorno bruto do last_object_clicked:", evt)
-
-mun = valor = None
-
-if evt and isinstance(evt, dict):
-    # 1) Tente obter diretamente das properties (se vierem)
-    props = evt.get("properties") if "properties" in evt else evt
-    mun = (props or {}).get("NM_MUN")
-    valor = (props or {}).get("VALOR")
-
-    # 2) Se NÃO veio NM_MUN, faça ponto-em-polígono com GeoPandas
-    if not mun and "lat" in evt and "lng" in evt:
-        pt = gpd.points_from_xy([evt["lng"]], [evt["lat"]], crs="EPSG:4326")[0]
-        # pequena tolerância para cliques na borda (aprox. ~10m)
-        poly = gdf_muns[gdf_muns.intersects(pt.buffer(0.0001))]
-        if not poly.empty:
-            mun = str(poly.iloc[0]["NM_MUN"]).strip().upper()
-            # como você já injeta VALOR por camada, podemos recuperá-lo do dict 'valores'
-            # mas aqui é mais simples computar pela sua df_metric/df_qualificacao:
-            # use o mesmo cálculo do build_map, ou só ignore 'valor' no toast/modal se não precisar
-            valor = None
-
-# st.write("DEBUG - Município resolvido:", mun, " | Valor:", valor)
-
-if mun and mun != st.session_state.mun_clicked: 
-    st.session_state.mun_clicked = mun
-    st.toast(f"Município: {mun}" + (f" — {camada}: {valor}" if valor is not None else ""), icon="✅")
-    show_municipio_dialog(mun, df_qualificacao, camada)
-
-
-
+mapa_fragment(geojson_data, camada, df_qualificacao)
