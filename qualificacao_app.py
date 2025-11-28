@@ -438,6 +438,246 @@ with g2:
 st.divider()
 
 
+# ==========================================================
+#  NOVA SEÇÃO: Top 10 por taxa de aproveitamento (conclusão)
+# ==========================================================
+st.markdown("---")
+st.markdown(
+    """
+    <h3 style='display:flex; align-items:center; color:#6c91c8; margin:8px 0 0 0;'>
+        <span style='font-size:1.2em; margin-right:6px;'>✅</span>
+        Top 10 por taxa de aproveitamento (concludentes / inscritos)
+    </h3>
+    """,
+    unsafe_allow_html=True
+)
+
+# ---------- função utilitária p/ montar ranking por taxa ----------
+def _top_por_taxa(df_base, chave, min_inscritos=50, topn=10):
+    """
+    df_base: DataFrame com colunas ['CURSO','Município','qtd_inscritos','qtd_concludentes']
+    chave: 'CURSO' ou 'Município'
+    min_inscritos: limiar mínimo de inscritos para entrar no ranking (anti-ruído)
+    """
+    ag = (
+        df_base
+        .groupby(chave, dropna=False)[["qtd_inscritos", "qtd_concludentes"]]
+        .sum()
+        .reset_index()
+        .rename(columns={chave: "chave"})
+    )
+    # evita divisão por zero e ruídos
+    ag = ag[ag["qtd_inscritos"] >= min_inscritos].copy()
+    ag["taxa"] = (ag["qtd_concludentes"] / ag["qtd_inscritos"]).fillna(0.0)
+    # ordena e pega top N
+    ag = ag.sort_values("taxa", ascending=False).head(topn)
+    return ag
+
+# escolha do limiar (ajuste à vontade)
+LIMIAR_INSCRITOS_CURSO = 40
+LIMIAR_INSCRITOS_MUN   = 80
+
+# gera rankings
+top_taxa_cursos = _top_por_taxa(df_qualificacao, "CURSO",      min_inscritos=LIMIAR_INSCRITOS_CURSO, topn=10)
+top_taxa_muns   = _top_por_taxa(df_qualificacao, "Município",  min_inscritos=LIMIAR_INSCRITOS_MUN,   topn=10)
+
+# ---------- gráficos (2 colunas) ----------
+tc, tm = st.columns(2)
+
+with tc:
+    st.markdown(
+        "<div style='display:flex;align-items:center;gap:6px;color:#6c91c8;'>"
+        "<span style='font-size:1.1em;'>🎓</span>"
+        "<b>Top 10 cursos / taxa de aproveitamento</b>"
+        "</div>",
+        unsafe_allow_html=True
+    )
+    if not top_taxa_cursos.empty:
+        ch = (
+            alt.Chart(top_taxa_cursos)
+            .mark_bar()
+            .encode(
+                x=alt.X("taxa:Q", axis=alt.Axis(format="~%"), title="taxa de aproveitamento"),
+                y=alt.Y("chave:N", sort="-x", title="Curso"),
+                tooltip=[
+                    alt.Tooltip("chave:N",              title="Curso"),
+                    alt.Tooltip("qtd_inscritos:Q",      title="inscritos", format=",.0f"),
+                    alt.Tooltip("qtd_concludentes:Q",   title="concludentes", format=",.0f"),
+                    alt.Tooltip("taxa:Q",               title="taxa", format="~%")
+                ],
+                color=alt.value("#cf2e26"),
+            )
+            .properties(height=420)
+        )
+        st.altair_chart(ch, use_container_width=True)
+
+        # download CSV
+        st.download_button(
+            "Baixar Top 10 cursos (CSV)",
+            data=top_taxa_cursos.to_csv(index=False).encode("utf-8"),
+            file_name="top10_cursos_taxa.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("Sem dados suficientes para cursos (verifique o limiar de inscritos).")
+
+with tm:
+    st.markdown(
+        "<div style='display:flex;align-items:center;gap:6px;color:#6c91c8;'>"
+        "<span style='font-size:1.1em;'>🏙️</span>"
+        "<b>Top 10 municípios / taxa de aproveitamento</b>"
+        "</div>",
+        unsafe_allow_html=True
+    )
+    if not top_taxa_muns.empty:
+        ch2 = (
+            alt.Chart(top_taxa_muns)
+            .mark_bar()
+            .encode(
+                x=alt.X("taxa:Q", axis=alt.Axis(format="~%"), title="taxa de aproveitamento"),
+                y=alt.Y("chave:N", sort="-x", title="Município"),
+                tooltip=[
+                    alt.Tooltip("chave:N",              title="Município"),
+                    alt.Tooltip("qtd_inscritos:Q",      title="inscritos", format=",.0f"),
+                    alt.Tooltip("qtd_concludentes:Q",   title="concludentes", format=",.0f"),
+                    alt.Tooltip("taxa:Q",               title="taxa", format="~%")
+                ],
+                color=alt.value("#cf2e26"),
+            )
+            .properties(height=420)
+        )
+        st.altair_chart(ch2, use_container_width=True)
+
+        # download CSV
+        st.download_button(
+            "Baixar Top 10 municípios (CSV)",
+            data=top_taxa_muns.to_csv(index=False).encode("utf-8"),
+            file_name="top10_municipios_taxa.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("Sem dados suficientes para municípios (verifique o limiar de inscritos).")
+st.divider()
+
+
+# ==========================================================
+#  NOVA SEÇÃO: Menores taxas de aproveitamento
+# ==========================================================
+st.markdown("---")
+st.markdown(
+    """
+    <h3 style='display:flex; align-items:center; color:#6c91c8; margin:8px 0 0 0;'>
+        <span style='font-size:1.2em; margin-right:6px;'>⚠️</span>
+        Menores taxas de aproveitamento (concludentes / inscritos)
+    </h3>
+    """,
+    unsafe_allow_html=True
+)
+
+def _bottom_por_taxa(df_base, chave, min_inscritos=50, n=10):
+    """
+    df_base: DataFrame com colunas ['CURSO','Município','qtd_inscritos','qtd_concludentes']
+    chave: 'CURSO' ou 'Município'
+    min_inscritos: limiar mínimo de inscritos para entrar no ranking (anti-ruído)
+    """
+    ag = (
+        df_base
+        .groupby(chave, dropna=False)[["qtd_inscritos", "qtd_concludentes"]]
+        .sum()
+        .reset_index()
+        .rename(columns={chave: "chave"})
+    )
+    ag = ag[ag["qtd_inscritos"] >= min_inscritos].copy()
+    ag["taxa"] = (ag["qtd_concludentes"] / ag["qtd_inscritos"]).fillna(0.0)
+
+    # Menores taxas primeiro
+    ag = ag.sort_values("taxa", ascending=True).head(n)
+    return ag
+
+# use os mesmos limiares da seção anterior (ajuste à vontade)
+LIMIAR_INSCRITOS_CURSO = 40
+LIMIAR_INSCRITOS_MUN   = 80
+
+bottom_taxa_cursos = _bottom_por_taxa(df_qualificacao, "CURSO",
+                                      min_inscritos=LIMIAR_INSCRITOS_CURSO, n=10)
+bottom_taxa_muns   = _bottom_por_taxa(df_qualificacao, "Município",
+                                      min_inscritos=LIMIAR_INSCRITOS_MUN, n=10)
+
+bc, bm = st.columns(2)
+
+with bc:
+    st.markdown(
+        "<div style='display:flex;align-items:center;gap:6px;color:#6c91c8;'>"
+        "<span style='font-size:1.1em;'>📉</span>"
+        "<b>Piores 10 cursos / taxa de aproveitamento</b>"
+        "</div>",
+        unsafe_allow_html=True
+    )
+    if not bottom_taxa_cursos.empty:
+        ch = (
+            alt.Chart(bottom_taxa_cursos)
+            .mark_bar()
+            .encode(
+                x=alt.X("taxa:Q", axis=alt.Axis(format="~%"), title="taxa de aproveitamento"),
+                y=alt.Y("chave:N", sort="x", title="Curso"),   # sort crescente p/ piores no topo
+                tooltip=[
+                    alt.Tooltip("chave:N",              title="Curso"),
+                    alt.Tooltip("qtd_inscritos:Q",      title="inscritos", format=",.0f"),
+                    alt.Tooltip("qtd_concludentes:Q",   title="concludentes", format=",.0f"),
+                    alt.Tooltip("taxa:Q",               title="taxa", format="~%")
+                ],
+                color=alt.value("#6c91c8"),            # azul da marca (troque se preferir)
+            )
+            .properties(height=420)
+        )
+        st.altair_chart(ch, use_container_width=True)
+
+        st.download_button(
+            "Baixar piores 10 cursos (CSV)",
+            data=bottom_taxa_cursos.to_csv(index=False).encode("utf-8"),
+            file_name="piores10_cursos_taxa.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("Sem dados suficientes para cursos (verifique o limiar de inscritos).")
+
+with bm:
+    st.markdown(
+        "<div style='display:flex;align-items:center;gap:6px;color:#6c91c8;'>"
+        "<span style='font-size:1.1em;'>🏚️</span>"
+        "<b>Piores 10 municípios / taxa de aproveitamento</b>"
+        "</div>",
+        unsafe_allow_html=True
+    )
+    if not bottom_taxa_muns.empty:
+        ch2 = (
+            alt.Chart(bottom_taxa_muns)
+            .mark_bar()
+            .encode(
+                x=alt.X("taxa:Q", axis=alt.Axis(format="~%"), title="taxa de aproveitamento"),
+                y=alt.Y("chave:N", sort="x", title="Município"),
+                tooltip=[
+                    alt.Tooltip("chave:N",              title="Município"),
+                    alt.Tooltip("qtd_inscritos:Q",      title="inscritos", format=",.0f"),
+                    alt.Tooltip("qtd_concludentes:Q",   title="concludentes", format=",.0f"),
+                    alt.Tooltip("taxa:Q",               title="taxa", format="~%")
+                ],
+                color=alt.value("#6c91c8"),
+            )
+            .properties(height=420)
+        )
+        st.altair_chart(ch2, use_container_width=True)
+
+        st.download_button(
+            "Baixar piores 10 municípios (CSV)",
+            data=bottom_taxa_muns.to_csv(index=False).encode("utf-8"),
+            file_name="piores10_municipios_taxa.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("Sem dados suficientes para municípios (verifique o limiar de inscritos).")
+st.divider()
+
 
 def build_map(geojson_data, camada, df):
     # m = folium.Map(location=[-5.3159, -39.2129], zoom_start=7, tiles="CartoDB positron")
@@ -485,7 +725,7 @@ def build_map(geojson_data, camada, df):
         # Bins fixos (QGIS): 1-5, 5-10, 10-20, 20-max
         vmax = max(20.0, float(df_metric["valor"].max()))
         bins = [1.0, 2.0, 5.0, 10.0, 20.0, vmax]
-        colormap = linear.Greens_05.to_step(index=bins)
+        colormap = linear.plasma.to_step(index=bins)
         colormap.caption = "Cursos por Município"
         colormap.add_to(m)
 
@@ -493,7 +733,7 @@ def build_map(geojson_data, camada, df):
         # Bins fixos (QGIS): 0-100, 100-200, 200-500, 500-1000, 1000-max
         vmax = max(1000.0, float(df_metric["valor"].max()))
         bins = [0.0, 100.0, 150.0, 200.0, 500.0, 1000.0, vmax]
-        colormap = linear.Greens_06.to_step(index=bins)
+        colormap = linear.YlGnBu_04.to_step(index=bins)
         colormap.caption = "Concludentes por Município"
         colormap.add_to(m)
 
