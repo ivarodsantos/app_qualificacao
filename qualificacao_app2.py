@@ -117,26 +117,6 @@ cozinha_csf_icon = folium.CustomIcon(
 
 #-------------- Pré processamento dos dados --------------#
 
-# 1 - Separando dados para filtros
-
-# 1.1 - lista de municípios
-# municipios = municipios_geojson["features"]
-# municipios_list = [municipio["properties"]["NM_MUN"] for municipio in municipios]
-# municipios_list.sort()
-
-# 1.2 - lista de entidades executoras
-# executoras_list = cursos_df["EXECUTORA"].dropna().unique().tolist()
-# executoras_list.sort()
-
-# 1.3 - Lista de Cursos
-# cursos_list = cursos_df["CURSO"].dropna().unique().tolist()
-# cursos_list.sort()
-
-# 1.4 - Lista de áreas de qualificação
-# areas_qualificacao_list = cursos_df["ÁREA DO CURSO\n(automático)"].dropna().unique().tolist()
-# areas_qualificacao_list.sort()
-
-
 
 # Mesclar dados dos cursos com dados da plataforma
 merged_df = merge_id_plataforma(cursos_df, df_kitchen)
@@ -156,6 +136,16 @@ merged_df_agg = merged_df.groupby(
         if merged_df.loc[x.index, "INSCRITOS"].sum() > 0 else 0
     ),
 ).reset_index()
+
+total_geral_turmas = merged_df_agg["total_turmas"].sum()
+total_geral_vagas = merged_df_agg["total_vagas_ofertadas"].sum()
+total_geral_inscritos = merged_df_agg["total_inscritos"].sum()
+total_geral_desistentes = merged_df_agg["total_desistentes"].sum()
+total_geral_concludentes = merged_df_agg["total_concludentes"].sum()
+percentual_geral_conclusao = round(
+    (total_geral_concludentes / total_geral_inscritos) * 100, 2
+) if total_geral_inscritos > 0 else 0
+
 
 
 # ----------------- Enriquecer GeoJSON com indicadores ----------------- #
@@ -199,11 +189,6 @@ colormap_conclusao.caption = "Percentual de conclusão (%)"
 municipios_com_qualificacao_merged = json.loads(
     gdf_mun_qualif_merged.to_json()
 )
-
-
-
-
-
 
 #----------------------------------------------------#
 
@@ -303,6 +288,33 @@ if algum_filtro_ativo:
         ]
 else:
     df_filtrado = base_df.copy()
+    
+    
+# Criar indicadores a partir do df_filtrado
+df_metrics = df_filtrado.groupby(
+    ["Código Município Completo", "Nome_Município", 'Nº LOTE 2025']
+).agg(
+    total_turmas=pd.NamedAgg(column="CURSO", aggfunc="nunique"),
+    total_vagas_ofertadas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
+    total_inscritos=pd.NamedAgg(column="INSCRITOS", aggfunc="sum"),
+    total_desistentes=pd.NamedAgg(column="DESISTENTES", aggfunc="sum"),
+    total_concludentes=pd.NamedAgg(column="CONCLUDENTES", aggfunc="sum"),
+    percentual_conclusao=pd.NamedAgg(
+        column="CONCLUDENTES",
+        aggfunc=lambda x: round(
+            (x.sum() / df_filtrado.loc[x.index, "INSCRITOS"].sum()) * 100, 2
+        ) if df_filtrado.loc[x.index, "INSCRITOS"].sum() > 0 else 0
+    ),
+).reset_index()
+
+total_geral_turmas = df_metrics["total_turmas"].sum()
+total_geral_vagas = df_metrics["total_vagas_ofertadas"].sum()
+total_geral_inscritos = df_metrics["total_inscritos"].sum()
+total_geral_desistentes = df_metrics["total_desistentes"].sum()
+total_geral_concludentes = df_metrics["total_concludentes"].sum()
+percentual_geral_conclusao = round(
+    (total_geral_concludentes / total_geral_inscritos) * 100, 2
+) if total_geral_inscritos > 0 else 0
 
     
     
@@ -392,15 +404,15 @@ if not algum_filtro_ativo:
 
 
 # Mapa interativo
-st.markdown(
-    "<h2 style='color:#6c91c8; font-weight:600; margin:0'>"
-    "Mapa Interativo de Cursos por Município"
-    "</h2>",
-    unsafe_allow_html=True,
-)
+# st.markdown(
+#     "<h2 style='color:#6c91c8; font-weight:600; margin:0'>"
+#     "Mapa Interativo de Cursos por Município"
+#     "</h2>",
+#     unsafe_allow_html=True,
+# )
 
 # Ajustar a grade de layout
-col_mapa, col_metricas = st.columns([2, 1])
+col_mapa, col_metricas = st.columns([1.3, 1])
 
 with col_mapa:
     st.markdown(
@@ -419,20 +431,7 @@ with col_mapa:
         municipios_choropleth_filtrado, 
         colormap_conclusao
     ):
-        # --- opcional: filtrar municípios pelo multiselect ---
-        # if selected_municipios and len(selected_municipios) < len(municipios_list):
-        #     features_filtradas_mun = [
-        #         f
-        #         for f in municipios_geojson["features"]
-        #         if f["properties"]["NM_MUN"] in selected_municipios
-        #     ]
-        #     municipios_geojson_filtrado = {
-        #         **municipios_geojson,
-        #         "features": features_filtradas_mun,
-        #     }
-        # else:
-        #     municipios_geojson_filtrado = municipios_geojson
-
+        
         # Elementos do mapa
         tooltip_municipios = folium.GeoJsonTooltip(
             fields=[
@@ -474,13 +473,6 @@ with col_mapa:
 
         # Controle de camadas
         folium.TileLayer("OpenStreetMap").add_to(m)
-
-        # municipios_feature_group = folium.FeatureGroup(name="Municípios").add_to(m)
-        # folium.GeoJson(
-        #     municipios_geojson_filtrado,
-        #     name="Municípios",
-        #     tooltip=tooltip_municipios,
-        # ).add_to(municipios_feature_group)
         
         
         municipios_qualif_feature_group = folium.FeatureGroup(name="Municípios com Qualificação").add_to(m)
@@ -499,26 +491,7 @@ with col_mapa:
             tooltip=tooltip_municipios,
         ).add_to(municipios_qualif_feature_group)
         
-        
-        # municipios_qualif_feature_group = folium.FeatureGroup(
-        #     name="Municípios com Qualificação"
-        # ).add_to(m)
-
-        # folium.GeoJson(
-        #     municipios_com_qualificacao,
-        #     name="Municípios com Qualificação",
-        #     style_function=lambda feature: {
-        #         "fillColor": "#4e90cc" 
-        #         if feature["properties"]["has_qualif"] == 1 
-        #         else '#f7e350',
-        #         'color': 'red',
-        #         'weight': 1,
-        #         'dashArray': '5, 5',
-        #         'fillOpacity': 0.6,
-        #     },
-        #     tooltip=tooltip_municipios,
-        # ).add_to(municipios_qualif_feature_group)
-
+       
         # -------- NOVA CAMADA: Choropleth % conclusão --------
         choropleth_feature_group_indicadores = folium.FeatureGroup(
             name="Percentual de conclusão",
@@ -623,20 +596,139 @@ with col_mapa:
 
 
 # --- MÉTRICAS À DIREITA ---
+
+# Custom CSS para estilizar os st.metrics
+st.markdown(
+    """
+    <style>
+
+    /* ====== CONTAINER DO CARD (st.metric) ====== */
+    div[data-testid="stMetric"] {
+        background-color: #f8f9ff;
+        border-radius: 16px;
+        padding: 1.6rem 1.4rem;       /* AUMENTA A ALTURA E LARGURA VISUAL */
+        min-height: 150px !important; /* ALTURA REAL */
+        width: 100% !important;       /* O CARD PASSA A OCUPAR A COLUNA INTEIRA */
+        box-shadow: 0 4px 8px rgba(15, 23, 42, 0.08);
+        border: 1px solid #d9e1ff;
+    }
+
+    /* ====== ROTULO DA MÉTRICA ====== */
+    div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+        font-size: 1.05rem !important;     /* AUMENTA TAMANHO */
+        font-weight: 600 !important;
+        white-space: normal !important;    /* QUERBRA LINHA */
+        text-overflow: unset !important;   /* NÃO CORTA TEXTO */
+        overflow: visible !important;
+        color: #475569;
+        line-height: 1.25;
+        margin-bottom: 0.55rem;            /* MAIS ESPAÇO */
+    }
+
+    /* ====== VALOR PRINCIPAL ====== */
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        font-size: 2.2rem !important;      /* VALOR GRANDE */
+        font-weight: 700;
+        color: #1e293b;
+        margin-top: 0.4rem;
+    }
+
+    /* ====== ESPAÇAMENTO ENTRE AS COLUNAS ====== */
+    div[data-testid="column"] {
+        padding-left: 0.8rem !important;
+        padding-right: 0.8rem !important;
+    }
+
+    /* ====== PERMITIR CARDS OCUPAREM MAIS ESPAÇO ====== */
+    section.main > div.block-container {
+        max-width: 1600px !important;      /* EXPANDE ÁREA TOTAL DA PÁGINA */
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+
+def format_int_br(valor):
+    """Formata inteiro com separador de milhar no padrão brasileiro."""
+    if pd.isna(valor):
+        return "-"
+    return f"{int(valor):,}".replace(",", ".")
+
+def format_percent_br(valor, casas=2):
+    """Formata percentual no padrão brasileiro (vírgula decimal)."""
+    if pd.isna(valor):
+        return "-"
+    txt = f"{valor:.{casas}f}"
+    return txt.replace(".", ",") + " %"
+
+
 with col_metricas:
-    st.subheader("Indicadores")
+    st.markdown(
+        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+        "Indicadores Gerais"
+        "</h4>",
+        unsafe_allow_html=True,
+    )
 
-    # Primeira linha com 3 métricas
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Temperatura", "70 °F", "1.2 °F")
-    m2.metric("Vento", "9 mph", "-8%")
-    m3.metric("Umidade", "86%", "4%")
+    st.markdown(
+        "<p style='color:#6b7280; font-size:0.85rem; margin-bottom:0.5rem;'>"
+        "Os valores abaixo refletem o recorte atual dos filtros à esquerda."
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
-    # Segunda linha com 3 métricas
-    m4, m5, m6 = st.columns(3)
-    m4.metric("Pressão", "30.34 inHg", "-2 inHg")
-    m5.metric("Visibilidade", "10 km", "1 km")
-    m6.metric("Índice UV", "5", "1")
+    # Grupo 1 – Escala do Programa
+    g1c1, g1c2, g1c3 = st.columns(3)
+    with g1c1:
+        st.metric("Turmas", format_int_br(total_geral_turmas))
+    with g1c2:
+        st.metric("Municípios atendidos", format_int_br(
+            df_filtrado["Código Município Completo"].nunique()
+        ))
+    with g1c3:
+        st.metric("Vagas ofertadas", format_int_br(total_geral_vagas))
+
+    # Espaço entre os grupos
+    st.markdown("<br/>", unsafe_allow_html=True)
+
+    # Grupo 2 – Participação e Conclusão
+    g2c1, g2c2, g2c3 = st.columns(3)
+    with g2c1:
+        st.metric("Inscritos", format_int_br(total_geral_inscritos))
+    with g2c2:
+        st.metric("Concludentes", format_int_br(total_geral_concludentes))
+    with g2c3:
+        st.metric("Conclusão geral (%)", format_percent_br(percentual_geral_conclusao))
+
+
+
+# Gráfico de barras dos 10 municípios com mais concludentes
+st.markdown(
+    "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+    "Top 10 Municípios por Concludentes"
+    "</h4>",
+    unsafe_allow_html=True,
+)
+top_mun = (
+    df_metrics.sort_values("total_concludentes", ascending=False)
+    .head(10)
+)
+
+chart = (
+    alt.Chart(top_mun)
+    .mark_bar()
+    .encode(
+        x=alt.X("total_concludentes:Q", title="Concludentes"),
+        y=alt.Y("Nome_Município:N", sort="-x", title="Município"),
+        tooltip=["Nome_Município", "total_concludentes"]
+    )
+    .properties(height=300)
+)
+
+st.altair_chart(chart, use_container_width=True)
 
 
 #----------------------------------------------------#
