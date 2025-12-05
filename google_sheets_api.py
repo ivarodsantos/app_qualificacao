@@ -1,0 +1,113 @@
+import os
+import pandas as pd
+
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+
+# Escopo de acesso: somente leitura da planilha
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+
+
+def get_sheets_service():
+    """
+    Cria e retorna um client da Google Sheets API autenticado via OAuth.
+    Usa:
+      - credentials.json  -> dados do app (baixado do Google Cloud)
+      - token.json        -> token de acesso do usuário (criado na 1ª vez)
+    """
+    creds = None
+
+    # Se já existir um token.json, tentamos reutilizar o login anterior
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+
+    # Se ainda não temos credenciais válidas, precisamos gerar/renovar
+    if not creds or not creds.valid:
+        # Caso as credenciais existam, mas estejam expiradas, tenta renovar
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            # Fluxo de autenticação baseado no arquivo credentials.json
+            flow = InstalledAppFlow.from_client_secrets_file(
+                "credentials.json",  # arquivo baixado do Google Cloud
+                SCOPES               # permissões que estamos pedindo
+            )
+            # Abre um servidor local e o navegador para login na conta Google
+            creds = flow.run_local_server(port=0)
+
+        # Salva o token para uso futuro (não precisar logar de novo)
+        with open("token.json", "w") as token:
+            token.write(creds.to_json())
+
+    # Cria o serviço (client) da API do Google Sheets
+    service = build("sheets", "v4", credentials=creds)
+    return service
+
+
+def extrair_id_planilha(link_planilha: str) -> str:
+    """
+    Recebe o link completo da planilha do Google Sheets e extrai o ID.
+
+    Exemplo de link:
+    https://docs.google.com/spreadsheets/d/ID_DA_PLANILHA/edit?gid=0#gid=0
+    """
+    try:
+        # Quebra o link em "/d/" e pega a parte depois disso
+        parte = link_planilha.split("/d/")[1]
+        # Da parte restante, pegamos tudo até a próxima "/"
+        planilha_id = parte.split("/")[0]
+        return planilha_id
+    except Exception as e:
+        raise ValueError(f"Não consegui extrair o ID da planilha. Verifique o link. Erro: {e}")
+
+
+def carregar_google_sheet_por_aba(
+    link_planilha: str,
+    nome_aba: str,
+    intervalo: str = "A:Z"
+) -> pd.DataFrame:
+    """
+    Lê dados de uma ABA específica da planilha e devolve um DataFrame do pandas.
+
+    Parâmetros:
+        link_planilha (str): link completo da planilha do Google Sheets
+        nome_aba (str): nome EXATO da aba (como aparece lá embaixo no Sheets)
+        intervalo (str): intervalo no formato A1 (ex.: 'A:Z', 'A1:K500', etc.)
+
+    Retorno:
+        pd.DataFrame com os dados lidos.
+    """
+    # 1) Extrai o ID da planilha a partir do link
+    spreadsheet_id = extrair_id_planilha(link_planilha)
+
+    # 2) Cria o serviço autenticado
+    service = get_sheets_service()
+
+    # 3) Monta o range no formato "NomeAba!Intervalo"
+    range_planilha = f"{nome_aba}!{intervalo}"
+
+    # 4) Faz a requisição para a API
+    result = (
+        service.spreadsheets()
+        .values()
+        .get(spreadsheetId=spreadsheet_id, range=range_planilha)
+        .execute()
+    )
+
+    # 5) Extrai os valores retornados
+    values = result.get("values", [])
+
+    if not values:
+        print("Nenhum dado encontrado nesse intervalo/aba.")
+        return pd.DataFrame()
+
+    # 6) Assume que a primeira linha é o cabeçalho
+    header = values[0]   # nomes das colunas
+    rows = values[1:]    # dados
+
+    # 7) Cria o DataFrame
+    df = pd.DataFrame(rows, columns=header)
+
+    return df

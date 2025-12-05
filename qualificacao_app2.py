@@ -13,6 +13,17 @@ from folium.plugins import Draw
 from branca.colormap import linear
 from branca.element import MacroElement, Template
 from merge_id_plataforma import merge_id_plataforma
+import acesso_planilha
+from acesso_planilha import carregar_google_sheet_aba
+from google_sheets_api import carregar_google_sheet_por_aba
+
+link = "https://docs.google.com/spreadsheets/d/1M2huy5RGW5D28zWRnBiHI4kSGWZNi5ejyygnxQjx7uo/edit?gid=0#gid=0"
+
+# Coloque aqui o NOME EXATO da aba, como aparece no Google Sheets
+nome_aba = "Compilado"  # exemplo; troque pelo nome real da aba
+intervalo = "A:AN"       # lê todas as colunas da aba; ajuste se quiser
+
+df = carregar_google_sheet_por_aba(link, nome_aba, intervalo)
 
 # Configurações iniciais do Streamlit
 st.set_page_config(layout="wide")
@@ -246,7 +257,7 @@ st.markdown(
 def load_data():
     # Carregar dados dos cursos
     cursos_df = pd.read_csv(
-        "data2/compilado_novos_lotes_merge_nomes_cozinhas_25112025.csv",
+        "data2/compilado_novos_lotes_merge_nomes_cozinhas_05122025.csv",
         encoding="utf-8",
         sep=";",
         # dtype={"Nº LOTE": "string", "Município": "string"},
@@ -488,7 +499,15 @@ else:
     df_filtrado = base_df.copy()
     
     
-# Criar indicadores a partir do df_filtrado
+df_filtrado["DATA INÍCIO"] = pd.to_datetime(df_filtrado["DATA INÍCIO"], dayfirst=True, errors="coerce")
+df_filtrado["DATA TÉRMINO"] = pd.to_datetime(df_filtrado["DATA TÉRMINO"], dayfirst=True, errors="coerce")
+df_filtrado["ANO_INICIO"] = df_filtrado["DATA INÍCIO"].dt.year
+df_filtrado["MES_INICIO"] = df_filtrado["DATA INÍCIO"].dt.month
+df_filtrado["DURACAO_DIAS"] = (df_filtrado["DATA TÉRMINO"] - df_filtrado["DATA INÍCIO"]).dt.days
+
+    
+    
+#-------------- Criar métricas a partir dos municípios --------------#
 df_metrics = df_filtrado.groupby(
     ["Código Município Completo", "Nome_Município", 'Nº LOTE 2025']
 ).agg(
@@ -513,6 +532,35 @@ total_geral_concludentes = df_metrics["total_concludentes"].sum()
 percentual_geral_conclusao = round(
     (total_geral_concludentes / total_geral_inscritos) * 100, 2
 ) if total_geral_inscritos > 0 else 0
+
+#----------------------------------------------------#
+
+#-------------- Criar métricas a partir das executoras --------------#
+df_metrics_exec = df_filtrado.groupby(
+    ["EXECUTORA"]
+).agg(
+    total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"),
+    total_vagas_ofertadas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
+    total_inscritos=pd.NamedAgg(column="INSCRITOS", aggfunc="sum"),
+    total_desistentes=pd.NamedAgg(column="DESISTENTES", aggfunc="sum"),
+    total_concludentes=pd.NamedAgg(column="CONCLUDENTES", aggfunc="sum"),
+    percentual_conclusao=pd.NamedAgg(
+        column="CONCLUDENTES",
+        aggfunc=lambda x: round(
+            (x.sum() / df_filtrado.loc[x.index, "INSCRITOS"].sum()) * 100, 2
+        ) if df_filtrado.loc[x.index, "INSCRITOS"].sum() > 0 else 0
+    ),
+).reset_index()
+
+total_geral_turmas_exec = df_metrics_exec["total_turmas"].sum()
+total_geral_vagas_exec = df_metrics_exec["total_vagas_ofertadas"].sum()
+total_geral_inscritos_exec = df_metrics_exec["total_inscritos"].sum()
+total_geral_desistentes_exec = df_metrics_exec["total_desistentes"].sum()
+total_geral_concludentes_exec = df_metrics_exec["total_concludentes"].sum()
+percentual_geral_conclusao_exec = round(
+    (total_geral_concludentes_exec / total_geral_inscritos_exec) * 100, 2
+) if total_geral_inscritos_exec > 0 else 0
+#----------------------------------------------------#
 
     
     
@@ -926,6 +974,36 @@ with col_metricas:
     with g2c3:
         st.metric("📈 Conclusão geral (%)", format_percent_br(percentual_geral_conclusao))
 
+#----------------------------------------------------#
+
+
+#-------------- Gráfico temporal --------------#
+
+df_temporal = (
+    df_filtrado.groupby(df_filtrado["DATA INÍCIO"].dt.to_period("M"))
+    .size()
+    .reset_index(name="qtd_turmas")
+)
+
+df_temporal["DATA"] = df_temporal["DATA INÍCIO"].dt.to_timestamp()
+
+chart = (
+    alt.Chart(df_temporal)
+    .mark_line(point=True)
+    .encode(
+        x=alt.X("DATA:T", title="Período"),
+        y=alt.Y("qtd_turmas:Q", title="Turmas iniciadas"),
+        tooltip=["DATA", "qtd_turmas"]
+    )
+    .properties(height=300, title="Turmas iniciadas por mês")
+)
+
+st.altair_chart(chart, use_container_width=True)
+#----------------------------------------------------#
+
+
+
+
 
 
 # Gráficos
@@ -985,6 +1063,61 @@ with col_grafico2:
     )
     st.altair_chart(chart2, use_container_width=True)
     
+    
+    
+col_grafico3, col_grafico4 = st.columns(2)
+
+with col_grafico3:
+    # Gráfico de barras dos 10 municípios com mais concludentes
+    st.markdown(
+        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+        "Top 10 Concludentes por Executora"
+        "</h4>",
+        unsafe_allow_html=True,
+    )
+    top_exec = (
+        df_metrics_exec.sort_values("total_concludentes", ascending=False)
+        .head(10)
+    )
+
+    chart3 = (
+        alt.Chart(top_exec)
+        .mark_bar()
+        .encode(
+            x=alt.X("total_concludentes:Q", title="Concludentes"),
+            y=alt.Y("EXECUTORA:N", sort="-x", title="Executora"),
+            tooltip=["EXECUTORA", "total_concludentes"]
+        )
+        .properties(height=300)
+    )
+
+    st.altair_chart(chart3, use_container_width=True)
+    
+with col_grafico4:
+    # Gráfico de barras dos 10 cursos com mais turmas
+    st.markdown(
+        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+        "Top 10 Turmas por Executora"
+        "</h4>",
+        unsafe_allow_html=True,
+    )
+    top_cursos = (
+        df_filtrado.groupby("EXECUTORA")['CURSO'].count()
+        .reset_index()
+        .sort_values("CURSO", ascending=False)
+    )
+    chart4 = (
+        alt.Chart(top_cursos)
+        .mark_bar()
+        .encode(
+            x=alt.X("CURSO:Q", title="Número de Turmas"),
+            y=alt.Y("EXECUTORA:N", sort="-x", title="Executora"),
+            tooltip=["EXECUTORA", "CURSO"]
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(chart4, use_container_width=True)
+    
 
 
 #----------------------------------------------------#
@@ -992,23 +1125,27 @@ st.write("merged_df")
 st.write(merged_df.head())
 st.write("merged_df_agg")
 st.write(merged_df_agg.head())
-st.write("municipios_com_qualificacao_merged")
-st.write(municipios_com_qualificacao_merged["features"][0]["properties"])
+# st.write("municipios_com_qualificacao_merged")
+# st.write(municipios_com_qualificacao_merged["features"][0]["properties"])
 st.write("df_opcoes")
 st.write(df_opcoes.head())
-st.write("geojson_cozinhas_csf_filtrado")
-st.write(geojson_cozinhas_csf_filtrado)
-st.write("features_csf_filtradas")
-st.write(features_csf_filtradas)
+# st.write("geojson_cozinhas_csf_filtrado")
+# st.write(geojson_cozinhas_csf_filtrado)
+# st.write("features_csf_filtradas")
+# st.write(features_csf_filtradas)
 st.write("df_filtrado")
 st.write(df_filtrado.head())
-st.write("cozinhas_geojson")
-st.write(cozinhas_geojson)
+# st.write("cozinhas_geojson")
+# st.write(cozinhas_geojson)
+
+st.write("exibindo df")
+st.write(df.head())
 
 
 st.write(session_state:=st.session_state)
 
 
-mun_series = merged_df["mun_upp"]
-st.write(mun_series.value_counts(dropna=False))
+# mun_series = merged_df["mun_upp"]
+st.write("Agrupando por executora")
+st.write(df_filtrado.groupby("EXECUTORA")['CURSO'].count())
 
