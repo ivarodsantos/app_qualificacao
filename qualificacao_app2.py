@@ -16,26 +16,221 @@ from merge_id_plataforma import merge_id_plataforma
 
 # Configurações iniciais do Streamlit
 st.set_page_config(layout="wide")
-    
 
-
-# — Fonte global: Space Grotesk —
 st.markdown(
     """
     <style>
-    /* carrega a fonte com todos os pesos disponíveis */
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
-
-    /* aplica globalmente na app */
-    .stApp, .stAppViewContainer, .main, .block-container,
-    h1, h2, h3, h4, h5, h6,
-    p, div, span, label, li, a, button, input, textarea, select {
-      font-family: 'Space Grotesk', sans-serif !important;
+    /* remove espaços extras entre componentes */
+    div.block-container {
+        padding-top: 0rem !important;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+st.markdown("""
+<style>
+
+    /* ======== 1. Fundo geral com textura geométrica suave ======== */
+    body {
+        background-color: #F7F9FB;
+        background-image: url('https://i.imgur.com/5T0R07N.png'); /* textura similar à página 11 */
+        background-size: cover;
+        background-attachment: fixed;
+    }
+
+    /* Remove padding superior padrão do Streamlit */
+    .block-container {
+        padding-top: 1rem;
+    }
+
+    /* ======== 2. Títulos no azul institucional ======== */
+    h1, h2, h3, h4 {
+        color: #1C4D99;   /* azul das páginas 1 e 3 do PDF */
+        font-weight: 700;
+    }
+
+    /* Subtítulos e labels */
+    label, .stSelectbox, .stMultiselect {
+        color: #4A7CC2 !important;  /* azul secundário */
+        font-weight: 600;
+    }
+
+    /* ======== 3. Cards de métricas no estilo CSF ======== */
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, #EAF0FF 0%, #FFFFFF 90%);
+        border-radius: 18px;
+        padding: 1.5rem 1.3rem;
+        min-height: 160px;
+        border: 1px solid #D6DDF1;
+        box-shadow: 0 6px 16px rgba(28, 77, 153, 0.15);
+    }
+
+    div[data-testid="stMetricLabel"] {
+        font-size: 1.0rem;
+        color: #1C4D99;
+        font-weight: 600;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 2.3rem;
+        font-weight: 700;
+        color: #D33F3F;  /* vermelho do coração/logomarca */
+    }
+
+    /* ======== 4. Botões com tema institucional ======== */
+    button[kind="primary"] {
+        background-color: #3F8E4D !important; /* verde governo */
+        color: white !important;
+        border-radius: 10px !important;
+        border: none !important;
+    }
+
+    button[kind="primary"]:hover {
+        background-color: #2E6E3A !important;
+    }
+
+    /* ======== 5. Selects (multiselect / selectbox) ======== */
+    section[data-testid="stSidebar"] {
+        background-color: #F3F4F6;
+    }
+
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] label {
+        color: #1C4D99;           /* azul institucional */
+        font-weight: 600;
+    }
+
+    /* Caixa dos selects na sidebar (multiselect / selectbox) */
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        background-color: #FFFFFF;
+        border-radius: 10px;
+        border: 1px solid #CBD5E1;              /* cinza suave */
+        box-shadow: 0 1px 3px rgba(15,23,42,.08);
+    }
+
+    /* texto dentro do select */
+    section[data-testid="stSidebar"] div[data-baseweb="select"] * {
+        font-size: 0.90rem;
+    }
+
+
+    /* ======== 6. Painéis de seção ======== */
+    .section-box {
+        background-color: #FFFFFF80;
+        padding: 1rem 1.5rem;
+        border-radius: 12px;
+        border-left: 6px solid #4A7CC2;
+        margin-top: 1rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.06);
+    }
+
+    /* ======== 7. Divisor temático ======== */
+    .divider {
+        height: 4px;
+        background: linear-gradient(to right, #1C4D99, #F4CE3B, #D33F3F);
+        margin: 1rem 0;
+        border-radius: 2px;
+    }
+
+    /* ======== Mapa com borda institucional e largura total ======== */
+    iframe, .folium-map {
+        border: 3px solid #1C4D99 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+        width: 100% !important;          /* ocupa toda a largura da coluna */
+        max-width: 100% !important;
+    }
+    
+    /* ====== CONTAINER BASE DO CARD (st.metric) ====== */
+    div[data-testid="stMetric"] {
+        border-radius: 18px;
+        padding: 1.5rem 1.3rem;
+        min-height: 150px;
+        border: 1px solid #D6DDF1;
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.09);
+        background: #FFFFFF;   /* base branca, vamos colorir por card abaixo */
+    }
+
+    /* Label dos cards */
+    div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+        font-size: 1.0rem;
+        color: #1C4D99;
+        font-weight: 600;
+    }
+
+    /* Valor dos cards */
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        font-size: 2.3rem;
+        font-weight: 700;
+        color: #111827;
+    }
+    
+    /* 1º card – Turmas (azul claro) */
+    div[data-testid="stMetric"]:nth-of-type(1) {
+        background: linear-gradient(135deg, #EAF0FF 0%, #FFFFFF 70%);
+    }
+
+    /* 2º card – Municípios atendidos (verde claro) */
+    div[data-testid="stMetric"]:nth-of-type(2) {
+        background: linear-gradient(135deg, #E5F5EA 0%, #FFFFFF 70%);
+    }
+
+    /* 3º card – Vagas ofertadas (amarelo claro) */
+    div[data-testid="stMetric"]:nth-of-type(3) {
+        background: linear-gradient(135deg, #FFF7D6 0%, #FFFFFF 70%);
+    }
+
+    /* 4º card – Inscritos (azul médio) */
+    div[data-testid="stMetric"]:nth-of-type(4) {
+        background: linear-gradient(135deg, #E0ECFF 0%, #FFFFFF 70%);
+    }
+
+    /* 5º card – Concludentes (vermelho suave) */
+    div[data-testid="stMetric"]:nth-of-type(5) {
+        background: linear-gradient(135deg, #FFE3E0 0%, #FFFFFF 70%);
+    }
+
+    /* 6º card – Conclusão geral (%) (blend azul + amarelo) */
+    div[data-testid="stMetric"]:nth-of-type(6) {
+        background: linear-gradient(135deg, #EAF0FF 0%, #FFF7D6 60%, #FFFFFF 100%);
+    }
+
+
+    
+    </style>
+    """, 
+    unsafe_allow_html=True)
+
+    
+
+
+# — Fonte global + Material Icons —
+st.markdown(
+    """
+    
+    <style>
+    /* carrega a fonte com todos os pesos disponíveis */
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
+    /* aplica globalmente na app, mas NÃO nos spans de ícone */
+    .stApp, .stAppViewContainer, .main, .block-container,
+    h1, h2, h3, h4, h5, h6,
+    p, label, li, a, button, input, textarea, select {
+        font-family: 'Space Grotesk', sans-serif !important;
+    }
+
+    
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
 
 
 st.markdown(
@@ -121,11 +316,13 @@ cozinha_csf_icon = folium.CustomIcon(
 # Mesclar dados dos cursos com dados da plataforma
 merged_df = merge_id_plataforma(cursos_df, df_kitchen)
 
+# Quantidade de cursos concluidos
+# merged_df[merged_df['STATUS'] == "Concluído"]['CURSO'].count()
 
 merged_df_agg = merged_df.groupby(
     ["Código Município Completo", "Nome_Município", 'Nº LOTE 2025']
 ).agg(
-    total_turmas=pd.NamedAgg(column="CURSO", aggfunc="nunique"),
+    total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"),
     total_vagas_ofertadas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
     total_inscritos=pd.NamedAgg(column="INSCRITOS", aggfunc="sum"),
     total_desistentes=pd.NamedAgg(column="DESISTENTES", aggfunc="sum"),
@@ -224,6 +421,7 @@ curso_options = sorted(df_opcoes["CURSO"].dropna().unique().tolist())
 area_options  = sorted(df_opcoes["ÁREA DO CURSO\n(automático)"].dropna().unique().tolist())
 
 #-------------- Layout do Streamlit --------------#
+st.sidebar.image('icons/neg_color.png', use_container_width=True)
 st.sidebar.header("Filtros de Análise")
 
 # 4) Widgets usando essas opções + default mantendo seleções válidas
@@ -294,7 +492,7 @@ else:
 df_metrics = df_filtrado.groupby(
     ["Código Município Completo", "Nome_Município", 'Nº LOTE 2025']
 ).agg(
-    total_turmas=pd.NamedAgg(column="CURSO", aggfunc="nunique"),
+    total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"),
     total_vagas_ofertadas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
     total_inscritos=pd.NamedAgg(column="INSCRITOS", aggfunc="sum"),
     total_desistentes=pd.NamedAgg(column="DESISTENTES", aggfunc="sum"),
@@ -559,14 +757,15 @@ with col_mapa:
 
         # >>> AQUI é onde a mágica acontece <<<
         st_data = st_folium(
-            m,
-            width=725,
-            height=600,
-            key="mapa_qualificacao",
-            returned_objects=["last_object_clicked"],
-            center=st.session_state.map_state["center"],
-            zoom=st.session_state.map_state["zoom"],
-        )
+                    m,
+                    width=None,              # deixa o CSS controlar a largura
+                    height=550,              # um pouco menor, pra equilibrar com os cards
+                    key="mapa_qualificacao",
+                    returned_objects=["last_object_clicked"],
+                    center=st.session_state.map_state["center"],
+                    zoom=st.session_state.map_state["zoom"],
+                )
+
 
         # Atualiza o estado global com as interações do mapa
         if st_data:
@@ -602,47 +801,61 @@ st.markdown(
     """
     <style>
 
-    /* ====== CONTAINER DO CARD (st.metric) ====== */
-    div[data-testid="stMetric"] {
-        background-color: #f8f9ff;
-        border-radius: 16px;
-        padding: 1.6rem 1.4rem;       /* AUMENTA A ALTURA E LARGURA VISUAL */
-        min-height: 150px !important; /* ALTURA REAL */
-        width: 100% !important;       /* O CARD PASSA A OCUPAR A COLUNA INTEIRA */
-        box-shadow: 0 4px 8px rgba(15, 23, 42, 0.08);
-        border: 1px solid #d9e1ff;
+    /* Aumenta a largura útil da página */
+    section.main > div.block-container {
+        max-width: 1650px !important;
+        padding-top: 1rem !important;
     }
 
-    /* ====== ROTULO DA MÉTRICA ====== */
-    div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-        font-size: 1.05rem !important;     /* AUMENTA TAMANHO */
-        font-weight: 600 !important;
-        white-space: normal !important;    /* QUERBRA LINHA */
-        text-overflow: unset !important;   /* NÃO CORTA TEXTO */
-        overflow: visible !important;
-        color: #475569;
-        line-height: 1.25;
-        margin-bottom: 0.55rem;            /* MAIS ESPAÇO */
+    /* ====== CONTAINER DO CARD (st.metric) ====== */
+    div[data-testid="stMetric"] {
+        background: radial-gradient(circle at top left, #eef2ff, #f9fafb);
+        border-radius: 18px;
+        padding: 1.6rem 1.5rem;             /* altura e “respiro” do card */
+        min-height: 160px !important;       /* deixa BEM alto */
+        width: 100% !important;             /* ocupa toda a coluna */
+        box-shadow: 0 7px 18px rgba(15, 23, 42, 0.10);
+        border: 1px solid #d4ddff;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
+
+    /* ====== RÓTULO DA MÉTRICA ====== */
+    div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
+        font-size: 1.05rem !important;
+        font-weight: 600 !important;
+        white-space: normal !important;      /* permite quebra de linha */
+        text-overflow: unset !important;
+        overflow: visible !important;
+        word-break: break-word;              /* quebra se ficar muito longo */
+        color: #4b5563;
+        line-height: 1.25;
+        margin-bottom: 0.55rem;
+    }
+
 
     /* ====== VALOR PRINCIPAL ====== */
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 2.2rem !important;      /* VALOR GRANDE */
+        font-size: 2.0rem !important;        /* um tiquinho menor */
         font-weight: 700;
-        color: #1e293b;
-        margin-top: 0.4rem;
+        color: #111827;
+        margin-top: 0.25rem;
+        white-space: normal !important;
     }
 
-    /* ====== ESPAÇAMENTO ENTRE AS COLUNAS ====== */
+
+    /* ====== DELTA (se vier a usar) ====== */
+    div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+        font-size: 0.9rem !important;
+    }
+
+    /* ====== espaçamento entre colunas de métricas ====== */
     div[data-testid="column"] {
-        padding-left: 0.8rem !important;
-        padding-right: 0.8rem !important;
+        padding-left: 0.9rem !important;
+        padding-right: 0.9rem !important;
     }
 
-    /* ====== PERMITIR CARDS OCUPAREM MAIS ESPAÇO ====== */
-    section.main > div.block-container {
-        max-width: 1600px !important;      /* EXPANDE ÁREA TOTAL DA PÁGINA */
-    }
 
     </style>
     """,
@@ -682,53 +895,96 @@ with col_metricas:
 
     # Grupo 1 – Escala do Programa
     g1c1, g1c2, g1c3 = st.columns(3)
+
     with g1c1:
-        st.metric("Turmas", format_int_br(total_geral_turmas))
+        st.metric("📘 Turmas", format_int_br(total_geral_turmas))
+
     with g1c2:
-        st.metric("Municípios atendidos", format_int_br(
-            df_filtrado["Código Município Completo"].nunique()
-        ))
+        st.metric(
+            "🗺️ Municípios atendidos",
+            format_int_br(df_filtrado['Código Município Completo'].nunique()),
+        )
+
     with g1c3:
-        st.metric("Vagas ofertadas", format_int_br(total_geral_vagas))
+        st.metric("🎯 Vagas ofertadas", format_int_br(total_geral_vagas))
+
+
+
 
     # Espaço entre os grupos
     st.markdown("<br/>", unsafe_allow_html=True)
 
     # Grupo 2 – Participação e Conclusão
     g2c1, g2c2, g2c3 = st.columns(3)
+
     with g2c1:
-        st.metric("Inscritos", format_int_br(total_geral_inscritos))
+        st.metric("👥 Inscritos", format_int_br(total_geral_inscritos))
+
     with g2c2:
-        st.metric("Concludentes", format_int_br(total_geral_concludentes))
+        st.metric("🏅 Concludentes", format_int_br(total_geral_concludentes))
+
     with g2c3:
-        st.metric("Conclusão geral (%)", format_percent_br(percentual_geral_conclusao))
+        st.metric("📈 Conclusão geral (%)", format_percent_br(percentual_geral_conclusao))
 
 
 
-# Gráfico de barras dos 10 municípios com mais concludentes
-st.markdown(
-    "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
-    "Top 10 Municípios por Concludentes"
-    "</h4>",
-    unsafe_allow_html=True,
-)
-top_mun = (
-    df_metrics.sort_values("total_concludentes", ascending=False)
-    .head(10)
-)
+# Gráficos
 
-chart = (
-    alt.Chart(top_mun)
-    .mark_bar()
-    .encode(
-        x=alt.X("total_concludentes:Q", title="Concludentes"),
-        y=alt.Y("Nome_Município:N", sort="-x", title="Município"),
-        tooltip=["Nome_Município", "total_concludentes"]
+col_grafico1, col_grafico2 = st.columns(2)
+
+with col_grafico1:
+    # Gráfico de barras dos 10 municípios com mais concludentes
+    st.markdown(
+        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+        "Top 10 Municípios por Concludentes"
+        "</h4>",
+        unsafe_allow_html=True,
     )
-    .properties(height=300)
-)
+    top_mun = (
+        df_metrics.sort_values("total_concludentes", ascending=False)
+        .head(10)
+    )
 
-st.altair_chart(chart, use_container_width=True)
+    chart = (
+        alt.Chart(top_mun)
+        .mark_bar()
+        .encode(
+            x=alt.X("total_concludentes:Q", title="Concludentes"),
+            y=alt.Y("Nome_Município:N", sort="-x", title="Município"),
+            tooltip=["Nome_Município", "total_concludentes"]
+        )
+        .properties(height=300)
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+    
+with col_grafico2:
+    # Gráfico de barras dos 10 cursos com mais turmas
+    st.markdown(
+        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+        "Top 10 Cursos por Número de Turmas"
+        "</h4>",
+        unsafe_allow_html=True,
+    )
+    top_cursos = (
+        df_filtrado.groupby("CURSO")
+        .agg(total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"))
+        .reset_index()
+        .sort_values("total_turmas", ascending=False)
+        .head(10)
+    )
+    chart2 = (
+        alt.Chart(top_cursos)
+        .mark_bar()
+        .encode(
+            x=alt.X("total_turmas:Q", title="Número de Turmas"),
+            y=alt.Y("CURSO:N", sort="-x", title="Curso"),
+            tooltip=["CURSO", "total_turmas"]
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(chart2, use_container_width=True)
+    
 
 
 #----------------------------------------------------#
