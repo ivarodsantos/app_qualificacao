@@ -28,218 +28,15 @@ df = carregar_google_sheet_por_aba(link, nome_aba, intervalo)
 # Configurações iniciais do Streamlit
 st.set_page_config(layout="wide")
 
-st.markdown(
-    """
-    <style>
-    /* remove espaços extras entre componentes */
-    div.block-container {
-        padding-top: 0rem !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
-st.markdown("""
-<style>
+# Função para carregar CSS externo
+def load_css(file_name):
+    with open(file_name, encoding="utf-8") as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
-    /* ======== 1. Fundo geral com textura geométrica suave ======== */
-    body {
-        background-color: #F7F9FB;
-        background-image: url('https://i.imgur.com/5T0R07N.png'); /* textura similar à página 11 */
-        background-size: cover;
-        background-attachment: fixed;
-    }
+# Carrega o CSS global
+load_css("styles.css")
 
-    /* Remove padding superior padrão do Streamlit */
-    .block-container {
-        padding-top: 1rem;
-    }
-
-    /* ======== 2. Títulos no azul institucional ======== */
-    h1, h2, h3, h4 {
-        color: #1C4D99;   /* azul das páginas 1 e 3 do PDF */
-        font-weight: 700;
-    }
-
-    /* Subtítulos e labels */
-    label, .stSelectbox, .stMultiselect {
-        color: #4A7CC2 !important;  /* azul secundário */
-        font-weight: 600;
-    }
-
-    /* ======== 3. Cards de métricas no estilo CSF ======== */
-    div[data-testid="stMetric"] {
-        background: linear-gradient(135deg, #EAF0FF 0%, #FFFFFF 90%);
-        border-radius: 18px;
-        padding: 1.5rem 1.3rem;
-        min-height: 160px;
-        border: 1px solid #D6DDF1;
-        box-shadow: 0 6px 16px rgba(28, 77, 153, 0.15);
-    }
-
-    div[data-testid="stMetricLabel"] {
-        font-size: 1.0rem;
-        color: #1C4D99;
-        font-weight: 600;
-    }
-
-    div[data-testid="stMetricValue"] {
-        font-size: 2.3rem;
-        font-weight: 700;
-        color: #D33F3F;  /* vermelho do coração/logomarca */
-    }
-
-    /* ======== 4. Botões com tema institucional ======== */
-    button[kind="primary"] {
-        background-color: #3F8E4D !important; /* verde governo */
-        color: white !important;
-        border-radius: 10px !important;
-        border: none !important;
-    }
-
-    button[kind="primary"]:hover {
-        background-color: #2E6E3A !important;
-    }
-
-    /* ======== 5. Selects (multiselect / selectbox) ======== */
-    section[data-testid="stSidebar"] {
-        background-color: #F3F4F6;
-    }
-
-    section[data-testid="stSidebar"] h1,
-    section[data-testid="stSidebar"] h2,
-    section[data-testid="stSidebar"] h3,
-    section[data-testid="stSidebar"] label {
-        color: #1C4D99;           /* azul institucional */
-        font-weight: 600;
-    }
-
-    /* Caixa dos selects na sidebar (multiselect / selectbox) */
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-        background-color: #FFFFFF;
-        border-radius: 10px;
-        border: 1px solid #CBD5E1;              /* cinza suave */
-        box-shadow: 0 1px 3px rgba(15,23,42,.08);
-    }
-
-    /* texto dentro do select */
-    section[data-testid="stSidebar"] div[data-baseweb="select"] * {
-        font-size: 0.90rem;
-    }
-
-
-    /* ======== 6. Painéis de seção ======== */
-    .section-box {
-        background-color: #FFFFFF80;
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        border-left: 6px solid #4A7CC2;
-        margin-top: 1rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.06);
-    }
-
-    /* ======== 7. Divisor temático ======== */
-    .divider {
-        height: 4px;
-        background: linear-gradient(to right, #1C4D99, #F4CE3B, #D33F3F);
-        margin: 1rem 0;
-        border-radius: 2px;
-    }
-
-    /* ======== Mapa com borda institucional e largura total ======== */
-    iframe, .folium-map {
-        border: 3px solid #1C4D99 !important;
-        border-radius: 12px !important;
-        box-shadow: 0 6px 16px rgba(0,0,0,0.15);
-        width: 100% !important;          /* ocupa toda a largura da coluna */
-        max-width: 100% !important;
-    }
-    
-    /* ====== CONTAINER BASE DO CARD (st.metric) ====== */
-    div[data-testid="stMetric"] {
-        border-radius: 18px;
-        padding: 1.5rem 1.3rem;
-        min-height: 150px;
-        border: 1px solid #D6DDF1;
-        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.09);
-        background: #FFFFFF;   /* base branca, vamos colorir por card abaixo */
-    }
-
-    /* Label dos cards */
-    div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-        font-size: 1.0rem;
-        color: #1C4D99;
-        font-weight: 600;
-    }
-
-    /* Valor dos cards */
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 2.3rem;
-        font-weight: 700;
-        color: #111827;
-    }
-    
-    /* 1º card – Turmas (azul claro) */
-    div[data-testid="stMetric"]:nth-of-type(1) {
-        background: linear-gradient(135deg, #EAF0FF 0%, #FFFFFF 70%);
-    }
-
-    /* 2º card – Municípios atendidos (verde claro) */
-    div[data-testid="stMetric"]:nth-of-type(2) {
-        background: linear-gradient(135deg, #E5F5EA 0%, #FFFFFF 70%);
-    }
-
-    /* 3º card – Vagas ofertadas (amarelo claro) */
-    div[data-testid="stMetric"]:nth-of-type(3) {
-        background: linear-gradient(135deg, #FFF7D6 0%, #FFFFFF 70%);
-    }
-
-    /* 4º card – Inscritos (azul médio) */
-    div[data-testid="stMetric"]:nth-of-type(4) {
-        background: linear-gradient(135deg, #E0ECFF 0%, #FFFFFF 70%);
-    }
-
-    /* 5º card – Concludentes (vermelho suave) */
-    div[data-testid="stMetric"]:nth-of-type(5) {
-        background: linear-gradient(135deg, #FFE3E0 0%, #FFFFFF 70%);
-    }
-
-    /* 6º card – Conclusão geral (%) (blend azul + amarelo) */
-    div[data-testid="stMetric"]:nth-of-type(6) {
-        background: linear-gradient(135deg, #EAF0FF 0%, #FFF7D6 60%, #FFFFFF 100%);
-    }
-
-
-    
-    </style>
-    """, 
-    unsafe_allow_html=True)
-
-    
-
-
-# — Fonte global + Material Icons —
-st.markdown(
-    """
-    
-    <style>
-    /* carrega a fonte com todos os pesos disponíveis */
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
-
-    /* aplica globalmente na app, mas NÃO nos spans de ícone */
-    .stApp, .stAppViewContainer, .main, .block-container,
-    h1, h2, h3, h4, h5, h6,
-    p, label, li, a, button, input, textarea, select {
-        font-family: 'Space Grotesk', sans-serif !important;
-    }
-
-    
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 
 
@@ -403,7 +200,24 @@ municipios_com_qualificacao_merged = json.loads(
 
 # ---------------- Filtros sincronizados ---------------- #
 
+
+# ---------------- Filtros sincronizados ---------------- #
+
 base_df = merged_df.copy()
+col_area = "ÁREA DO CURSO\n(automático)"
+
+def filtrar_dados(df, municipios, executoras, cursos, areas):
+    """Filtra o DataFrame com base nas listas de opções selecionadas."""
+    df_result = df.copy()
+    if municipios:
+        df_result = df_result[df_result["Nome_Município"].isin(municipios)]
+    if executoras:
+        df_result = df_result[df_result["EXECUTORA"].isin(executoras)]
+    if cursos:
+        df_result = df_result[df_result["CURSO"].isin(cursos)]
+    if areas:
+        df_result = df_result[df_result[col_area].isin(areas)]
+    return df_result
 
 # 1) Ler seleções atuais do session_state (antes de criar os widgets)
 sel_mun_prev   = st.session_state.get("f_mun", [])
@@ -412,24 +226,13 @@ sel_curso_prev = st.session_state.get("f_curso", [])
 sel_area_prev  = st.session_state.get("f_area", [])
 
 # 2) Montar df_opcoes aplicando essas seleções
-df_opcoes = base_df.copy()
-
-if sel_mun_prev:
-    df_opcoes = df_opcoes[df_opcoes["Nome_Município"].isin(sel_mun_prev)]
-if sel_exec_prev:
-    df_opcoes = df_opcoes[df_opcoes["EXECUTORA"].isin(sel_exec_prev)]
-if sel_curso_prev:
-    df_opcoes = df_opcoes[df_opcoes["CURSO"].isin(sel_curso_prev)]
-if sel_area_prev:
-    df_opcoes = df_opcoes[
-        df_opcoes["ÁREA DO CURSO\n(automático)"].isin(sel_area_prev)
-    ]
+df_opcoes = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, sel_area_prev)
 
 # 3) Opções disponíveis (AGORA a partir de df_opcoes → sincronizadas)
 mun_options   = sorted(df_opcoes["Nome_Município"].dropna().unique().tolist())
 exec_options  = sorted(df_opcoes["EXECUTORA"].dropna().unique().tolist())
 curso_options = sorted(df_opcoes["CURSO"].dropna().unique().tolist())
-area_options  = sorted(df_opcoes["ÁREA DO CURSO\n(automático)"].dropna().unique().tolist())
+area_options  = sorted(df_opcoes[col_area].dropna().unique().tolist())
 
 #-------------- Layout do Streamlit --------------#
 st.sidebar.image('icons/neg_color.png', use_container_width=True)
@@ -475,28 +278,99 @@ algum_filtro_ativo = any([
 
 # 6) Aplica as seleções ATUAIS a toda a base para montar df_filtrado
 if algum_filtro_ativo:
-    df_filtrado = base_df.copy()
-
-    if selected_municipios:
-        df_filtrado = df_filtrado[
-            df_filtrado["Nome_Município"].isin(selected_municipios)
-        ]
-    if selected_executoras:
-        df_filtrado = df_filtrado[
-            df_filtrado["EXECUTORA"].isin(selected_executoras)
-        ]
-    if selected_cursos:
-        df_filtrado = df_filtrado[
-            df_filtrado["CURSO"].isin(selected_cursos)
-        ]
-    if selected_areas_qualificacao:
-        df_filtrado = df_filtrado[
-            df_filtrado["ÁREA DO CURSO\n(automático)"].isin(
-                selected_areas_qualificacao
-            )
-        ]
+    df_filtrado = filtrar_dados(
+        base_df, 
+        selected_municipios, 
+        selected_executoras, 
+        selected_cursos, 
+        selected_areas_qualificacao
+    )
 else:
     df_filtrado = base_df.copy()
+#----------------------------------------------------#
+
+
+# -------------------------------------------------------------
+# Cálculo da taxa relativa de conclusão
+# -------------------------------------------------------------
+if "VAGAS OFERTADAS" in df_filtrado.columns and "CONCLUDENTES" in df_filtrado.columns:
+
+    df_filtrado["TAXA_CONCLUSAO"] = (
+        df_filtrado["CONCLUDENTES"] / df_filtrado["VAGAS OFERTADAS"]
+    ) * 100
+
+    # Evitar valores >100% ou negativos
+    df_filtrado["TAXA_CONCLUSAO"] = df_filtrado["TAXA_CONCLUSAO"].clip(0, 100)
+
+else:
+    st.warning("Colunas VAGAS OFERTADAS ou CONCLUDENTES não foram encontradas no DataFrame.")
+
+
+
+    
+# -------------------------------------------------------------------
+# Tratamento de datas e filtro temporal
+# -------------------------------------------------------------------
+
+# Garante que as colunas de data existem antes de mexer nelas
+col_data_inicio = "DATA INÍCIO"
+col_data_termino = "DATA TÉRMINO"
+
+if col_data_inicio in df_filtrado.columns and col_data_termino in df_filtrado.columns:
+    # Converter para datetime (uma vez por rerun)
+    df_filtrado[col_data_inicio] = pd.to_datetime(
+        df_filtrado[col_data_inicio],
+        dayfirst=True,
+        errors="coerce",
+    )
+    df_filtrado[col_data_termino] = pd.to_datetime(
+        df_filtrado[col_data_termino],
+        dayfirst=True,
+        errors="coerce",
+    )
+
+    # Criar campos derivados
+    df_filtrado["DURACAO_DIAS"] = (
+        df_filtrado[col_data_termino] - df_filtrado[col_data_inicio]
+    ).dt.days
+
+    df_filtrado["ANO_INICIO"] = df_filtrado[col_data_inicio].dt.year
+    df_filtrado["MES_INICIO"] = df_filtrado[col_data_inicio].dt.month
+    df_filtrado["ANO_MES_INICIO"] = df_filtrado[col_data_inicio].dt.to_period("M")
+
+    # ------------------- Filtro temporal na sidebar -------------------
+    datas_validas = df_filtrado[col_data_inicio].dropna()
+
+    if not datas_validas.empty:
+        min_data = datas_validas.min().date()
+        max_data = datas_validas.max().date()
+
+        periodo = st.sidebar.date_input(
+            "Período de início dos cursos:",
+            value=(min_data, max_data),
+            help="Filtra os cursos pelo intervalo de DATA INÍCIO.",
+        )
+
+        # O date_input pode retornar uma tupla (início, fim) ou uma única data
+        if isinstance(periodo, tuple) and len(periodo) == 2:
+            data_ini, data_fim = periodo
+        else:
+            data_ini = periodo
+            data_fim = periodo
+
+        data_ini = pd.to_datetime(data_ini)
+        data_fim = pd.to_datetime(data_fim)
+
+        df_filtrado = df_filtrado[
+            (df_filtrado[col_data_inicio] >= data_ini)
+            & (df_filtrado[col_data_inicio] <= data_fim)
+        ]
+else:
+    st.warning(
+        "Colunas de data não encontradas no df_filtrado. "
+        "Verifique os nomes das colunas de DATA INÍCIO e DATA TÉRMINO."
+    )
+
     
     
 df_filtrado["DATA INÍCIO"] = pd.to_datetime(df_filtrado["DATA INÍCIO"], dayfirst=True, errors="coerce")
@@ -532,6 +406,19 @@ total_geral_concludentes = df_metrics["total_concludentes"].sum()
 percentual_geral_conclusao = round(
     (total_geral_concludentes / total_geral_inscritos) * 100, 2
 ) if total_geral_inscritos > 0 else 0
+
+
+df_filtrado.rename(
+    columns={"ÁREA DO CURSO\n(automático)": "ÁREA DO CURSO (automático)"},
+    inplace=True
+)
+
+
+df_filtrado["ÁREA DO CURSO (automático)"] = (
+    df_filtrado["ÁREA DO CURSO (automático)"]
+    .str.strip()
+    .str.upper()
+)
 
 #----------------------------------------------------#
 
@@ -845,70 +732,7 @@ with col_mapa:
 # --- MÉTRICAS À DIREITA ---
 
 # Custom CSS para estilizar os st.metrics
-st.markdown(
-    """
-    <style>
 
-    /* Aumenta a largura útil da página */
-    section.main > div.block-container {
-        max-width: 1650px !important;
-        padding-top: 1rem !important;
-    }
-
-    /* ====== CONTAINER DO CARD (st.metric) ====== */
-    div[data-testid="stMetric"] {
-        background: radial-gradient(circle at top left, #eef2ff, #f9fafb);
-        border-radius: 18px;
-        padding: 1.6rem 1.5rem;             /* altura e “respiro” do card */
-        min-height: 160px !important;       /* deixa BEM alto */
-        width: 100% !important;             /* ocupa toda a coluna */
-        box-shadow: 0 7px 18px rgba(15, 23, 42, 0.10);
-        border: 1px solid #d4ddff;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-
-    /* ====== RÓTULO DA MÉTRICA ====== */
-    div[data-testid="stMetric"] label[data-testid="stMetricLabel"] {
-        font-size: 1.05rem !important;
-        font-weight: 600 !important;
-        white-space: normal !important;      /* permite quebra de linha */
-        text-overflow: unset !important;
-        overflow: visible !important;
-        word-break: break-word;              /* quebra se ficar muito longo */
-        color: #4b5563;
-        line-height: 1.25;
-        margin-bottom: 0.55rem;
-    }
-
-
-    /* ====== VALOR PRINCIPAL ====== */
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 2.0rem !important;        /* um tiquinho menor */
-        font-weight: 700;
-        color: #111827;
-        margin-top: 0.25rem;
-        white-space: normal !important;
-    }
-
-
-    /* ====== DELTA (se vier a usar) ====== */
-    div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
-        font-size: 0.9rem !important;
-    }
-
-    /* ====== espaçamento entre colunas de métricas ====== */
-    div[data-testid="column"] {
-        padding-left: 0.9rem !important;
-        padding-right: 0.9rem !important;
-    }
-
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 
 
@@ -977,6 +801,103 @@ with col_metricas:
 #----------------------------------------------------#
 
 
+
+# -------------------------------------------------------------------
+# Análises Temporais dos Cursos
+# -------------------------------------------------------------------
+
+st.subheader("Análises Temporais dos Cursos")
+
+# Garantir que temos datas válidas depois de todos os filtros
+if (
+    col_data_inicio in df_filtrado.columns
+    and df_filtrado[col_data_inicio].notna().sum() > 0
+):
+
+    # 1) Série temporal de turmas iniciadas por mês
+    df_temporal = (
+        df_filtrado
+        .dropna(subset=[col_data_inicio])
+        .copy()
+    )
+    df_temporal["PERIODO_M"] = df_temporal[col_data_inicio].dt.to_period("M")
+    df_temporal_group = (
+        df_temporal
+        .groupby("PERIODO_M")
+        .size()
+        .reset_index(name="qtd_turmas")
+    )
+    df_temporal_group["DATA"] = df_temporal_group["PERIODO_M"].dt.to_timestamp()
+
+    chart_turmas_mes = (
+        alt.Chart(df_temporal_group)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("DATA:T", title="Mês de início"),
+            y=alt.Y("qtd_turmas:Q", title="Quantidade de turmas"),
+            tooltip=["DATA:T", "qtd_turmas:Q"],
+        )
+        .properties(
+            height=300,
+            title="Turmas iniciadas por mês",
+        )
+    )
+
+    st.altair_chart(chart_turmas_mes, use_container_width=True)
+
+    # 2) Turmas por trimestre (se a coluna existir)
+    if "TRIMESTRE" in df_filtrado.columns:
+        df_trim = (
+            df_filtrado
+            .groupby("TRIMESTRE")["CURSO"]
+            .count()
+            .reset_index(name="qtd_turmas")
+        )
+
+        chart_trim = (
+            alt.Chart(df_trim)
+            .mark_bar()
+            .encode(
+                x=alt.X("TRIMESTRE:N", title="Trimestre"),
+                y=alt.Y("qtd_turmas:Q", title="Quantidade de turmas"),
+                tooltip=["TRIMESTRE", "qtd_turmas"],
+            )
+            .properties(
+                height=300,
+                title="Turmas por trimestre",
+            )
+        )
+
+        st.altair_chart(chart_trim, use_container_width=True)
+
+    # 3) Evolução de turmas por executora ao longo do tempo (se a coluna existir)
+    if "EXECUTORA" in df_filtrado.columns:
+        df_exec_tempo = (
+            df_temporal
+            .groupby(["PERIODO_M", "EXECUTORA"])
+            .size()
+            .reset_index(name="qtd_turmas")
+        )
+        df_exec_tempo["DATA"] = df_exec_tempo["PERIODO_M"].dt.to_timestamp()
+
+        chart_exec = (
+            alt.Chart(df_exec_tempo)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("DATA:T", title="Mês de início"),
+                y=alt.Y("qtd_turmas:Q", title="Turmas iniciadas"),
+                color=alt.Color("EXECUTORA:N", title="Executora"),
+                tooltip=["EXECUTORA", "DATA:T", "qtd_turmas:Q"],
+            )
+            .properties(
+                height=350,
+                title="Evolução das turmas iniciadas por executora",
+            )
+        )
+
+        st.altair_chart(chart_exec, use_container_width=True)
+
+
 #-------------- Gráfico temporal --------------#
 
 df_temporal = (
@@ -1000,6 +921,106 @@ chart = (
 
 st.altair_chart(chart, use_container_width=True)
 #----------------------------------------------------#
+
+
+
+
+
+# -------------------------------------------------------------
+# Scatter Plot: Duração dos cursos × Taxa de conclusão (%)
+# -------------------------------------------------------------
+if "DURACAO_DIAS" in df_filtrado.columns and "TAXA_CONCLUSAO" in df_filtrado.columns:
+
+    chart_taxa = (
+        alt.Chart(df_filtrado)
+        .mark_circle(size=70, opacity=0.7)
+        .encode(
+            x=alt.X("DURACAO_DIAS:Q", title="Duração do curso (dias)"),
+            y=alt.Y("TAXA_CONCLUSAO:Q", title="Taxa de Conclusão (%)"),
+            color=alt.Color("EXECUTORA:N", title="Executora"),
+            tooltip=["CURSO", "EXECUTORA", "DURACAO_DIAS", "CONCLUDENTES", "VAGAS OFERTADAS", "TAXA_CONCLUSAO"],
+        )
+        .properties(
+            title="Duração do Curso × Taxa de Conclusão (%)",
+            height=350,
+        )
+    )
+
+    st.altair_chart(chart_taxa, use_container_width=True)
+# -------------------------------------------------------------------
+
+
+# -------------------------------------------------------------
+# Taxa média de conclusão por área de qualificação
+# -------------------------------------------------------------
+if "ÁREA DO CURSO (automático)" in df_filtrado.columns and "TAXA_CONCLUSAO" in df_filtrado.columns:
+
+    df_area = (
+        df_filtrado
+        .groupby("ÁREA DO CURSO (automático)")["TAXA_CONCLUSAO"]
+        .mean()
+        .reset_index()
+    )
+
+    chart_area = (
+        alt.Chart(df_area)
+        .mark_bar()
+        .encode(
+            x=alt.X("TAXA_CONCLUSAO:Q", title="Taxa média de conclusão (%)"),
+            y=alt.Y("ÁREA DO CURSO (automático):N", title="Área de qualificação"),
+            color=alt.Color("ÁREA DO CURSO (automático):N", legend=None),
+            tooltip=["ÁREA DO CURSO (automático)", "TAXA_CONCLUSAO"],
+        )
+        .properties(
+            height=350,
+            title="Taxa Média de Conclusão por Área de Qualificação",
+        )
+    )
+
+    st.altair_chart(chart_area, use_container_width=True)
+
+
+# -------------------------------------------------------------
+# Boxplot: Distribuição da taxa de conclusão por área
+# -------------------------------------------------------------
+chart_box_area = (
+    alt.Chart(df_filtrado)
+    .mark_boxplot(
+        size=25,          # reduz largura para evitar sobreposição
+        # extent="min-max"  # mostra todos os outliers
+    )
+    .encode(
+        x=alt.X(
+            "TAXA_CONCLUSAO:Q",
+            title="Taxa de Conclusão (%)",
+            # scale=alt.Scale(domain=[0, 100])
+        ),
+        y=alt.Y(
+            "ÁREA DO CURSO (automático):N",
+            title="Área de Qualificação",
+            sort="-x"      # ordena por mediana descendente
+        ),
+        color=alt.Color(
+            "ÁREA DO CURSO (automático):N",
+            # legend=None
+        ),
+        tooltip=[
+            alt.Tooltip("ÁREA DO CURSO (automático):N", title="Área"),
+            alt.Tooltip("TAXA_CONCLUSAO:Q", format=".1f", title="Taxa (%)")
+        ]
+    )
+    .properties(
+        width=1100,   # largura real
+        height=600,   # altura generosa
+        title="Distribuição da Taxa de Conclusão por Área de Qualificação"
+    )
+)
+
+st.altair_chart(chart_box_area, theme=None)
+
+
+
+
 
 
 
@@ -1121,31 +1142,5 @@ with col_grafico4:
 
 
 #----------------------------------------------------#
-st.write("merged_df")
-st.write(merged_df.head())
-st.write("merged_df_agg")
-st.write(merged_df_agg.head())
-# st.write("municipios_com_qualificacao_merged")
-# st.write(municipios_com_qualificacao_merged["features"][0]["properties"])
-st.write("df_opcoes")
-st.write(df_opcoes.head())
-# st.write("geojson_cozinhas_csf_filtrado")
-# st.write(geojson_cozinhas_csf_filtrado)
-# st.write("features_csf_filtradas")
-# st.write(features_csf_filtradas)
-st.write("df_filtrado")
-st.write(df_filtrado.head())
-# st.write("cozinhas_geojson")
-# st.write(cozinhas_geojson)
 
-st.write("exibindo df")
-st.write(df.head())
-
-
-st.write(session_state:=st.session_state)
-
-
-# mun_series = merged_df["mun_upp"]
-st.write("Agrupando por executora")
-st.write(df_filtrado.groupby("EXECUTORA")['CURSO'].count())
 
