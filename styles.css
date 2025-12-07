@@ -145,15 +145,14 @@ section[data-testid="stSidebar"] div[data-baseweb="select"] * {
 }
 
 /* ======== Mapa com borda institucional e largura total ======== */
-iframe,
+/* iframe,
 .folium-map {
     border: 3px solid #1C4D99 !important;
     border-radius: 12px !important;
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
     width: 100% !important;
-    /* ocupa toda a largura da coluna */
     max-width: 100% !important;
-}
+} */
 
 /* ====== CONTAINER BASE DO CARD (st.metric) ====== */
 div[data-testid="stMetric"] {

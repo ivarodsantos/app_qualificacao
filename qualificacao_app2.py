@@ -174,53 +174,85 @@ percentual_geral_conclusao = round(
 
 
 
-# ----------------- Enriquecer GeoJSON com indicadores ----------------- #
+# ----------------- Enriquecer GeoJSON com indicadores (DINÂMICO) ----------------- #
 
-# 1. Preparar coluna de código no DataFrame agregado
-merged_df_agg["CD_MUN"] = (
-    merged_df_agg["Código Município Completo"]
-    .astype(str)
-    .str.zfill(7)          # garante 7 dígitos: 2300101, 2300200, etc.
-)
+@st.cache_data
+def get_base_geodataframe(geojson_data):
+    """Converte o GeoJSON bruto em GeoDataFrame para facilitar o merge."""
+    gdf = gpd.GeoDataFrame.from_features(geojson_data["features"])
+    # Padronizar CD_MUN
+    if "CD_MUN" in gdf.columns:
+         gdf["CD_MUN"] = gdf["CD_MUN"].astype(str).str.zfill(7)
+    return gdf
 
-# 2. Transformar o GeoJSON de municípios em GeoDataFrame
-gdf_mun_qualif = gpd.GeoDataFrame.from_features(
-    municipios_com_qualificacao["features"]
-)
+# Carrega o GDF base (agora cached)
+gdf_base_municipios = get_base_geodataframe(municipios_com_qualificacao)
 
-# 3. Padronizar a coluna de código no GeoDataFrame
-gdf_mun_qualif["CD_MUN"] = (
-    gdf_mun_qualif["CD_MUN"]
-    .astype(str)
-    .str.zfill(7)
-)
+def preparar_dados_mapa(df_input, gdf_base):
+    """
+    Agrega o dataframe filtrado por município e faz o merge com o GeoDataFrame.
+    Retorna o GeoJSON pronto para o Folium.
+    """
+    if df_input.empty:
+        # Se não há dados, retorna o mapa "vazio" mas com as geometrias
+        # Podemos adicionar colunas zeradas para não quebrar o tooltip
+        gdf_vazio = gdf_base.copy()
+        cols_metricas = ["total_turmas", "total_concludentes", "percentual_conclusao", "has_qualif"]
+        for c in cols_metricas:
+            gdf_vazio[c] = 0
+        return json.loads(gdf_vazio.to_json())
 
-# 4. Fazer o merge: municípios + indicadores de cursos/concludentes
-gdf_mun_qualif_merged = gdf_mun_qualif.merge(
-    merged_df_agg,
-    on="CD_MUN",
-    how="left",   # mantém todos os municípios do GeoJSON
-)
+    # 1. Agrega métricas por município baseado no DF FILTRADO
+    df_agg = df_input.groupby(
+        ["Código Município Completo", "Nome_Município"]
+    ).agg(
+        total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"),
+        total_vagas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
+        total_concludentes=pd.NamedAgg(column="CONCLUDENTES", aggfunc="sum"),
+        percentual_conclusao=pd.NamedAgg(
+            column="CONCLUDENTES", 
+            # aggfunc pode ser complexo, melhor calcular pós-agg se for soma/soma
+            aggfunc="sum" 
+        ),
+        # Nota: percentual_conclusao aqui ficou como soma de concludentes temporariamente
+        # Ajustaremos abaixo
+    ).reset_index()
 
-# --- colormap para o percentual de conclusão ---
-percentual_min = gdf_mun_qualif_merged["percentual_conclusao"].min()
-percentual_max = gdf_mun_qualif_merged["percentual_conclusao"].max()
+    # Recalcula percentual correto (Soma Concludentes / Soma Vagas) por município
+    # Precisa recalcular vagas também? Sim, total_vagas está ali.
+    df_agg["percentual_conclusao"] = df_agg.apply(
+        lambda row: round((row["total_concludentes"] / row["total_vagas"] * 100), 2) 
+        if row["total_vagas"] > 0 else 0, 
+        axis=1
+    )
 
-# usa um colormap contínuo de verde (pode trocar por YlOrRd, Blues, etc.)
-colormap_conclusao = linear.YlGn_09.scale(percentual_min, percentual_max)
-colormap_conclusao.caption = "Percentual de conclusão (%)"
+    # Prepara coluna de junção
+    df_agg["CD_MUN"] = df_agg["Código Município Completo"].astype(str).str.zfill(7)
+    df_agg["has_qualif"] = 1 # Se está no agg, tem qualificação no filtro atual
 
+    # 2. Merge com GeoDataFrame base
+    # Left join no GDF para manter geometria de quem não tem curso (opcional: inner se quiser sumir)
+    
+    # Remove colunas que podem dar conflito se já existirem no GeoJSON base
+    cols_para_remover = ["total_turmas", "total_concludentes", "percentual_conclusao", "has_qualif"]
+    gdf_base_clean = gdf_base.drop(columns=[c for c in cols_para_remover if c in gdf_base.columns])
+    
+    gdf_merged = gdf_base_clean.merge(
+        df_agg[["CD_MUN", "total_turmas", "total_concludentes", "percentual_conclusao", "has_qualif"]],
+        on="CD_MUN",
+        how="left"
+    )
+    
+    # Preenche NaNs resultantes do merge (municípios sem cursos no filtro atual)
+    gdf_merged["total_turmas"] = gdf_merged["total_turmas"].fillna(0)
+    gdf_merged["total_concludentes"] = gdf_merged["total_concludentes"].fillna(0)
+    gdf_merged["percentual_conclusao"] = gdf_merged["percentual_conclusao"].fillna(0)
+    gdf_merged["has_qualif"] = gdf_merged["has_qualif"].fillna(0)
+    
+    # 3. Simplifica (opcional, já pode estar simplificado no source, mas bom garantir se for pesado)
+    # gdf_merged["geometry"] = gdf_merged["geometry"].simplify(0.01)
 
-# 5. Simplificar geometrias para performance (reduzir vertex count)
-# Tolerance 0.01 graus é aprox 1km, ajuste fino para manter visual ok mas leve
-gdf_mun_qualif_merged["geometry"] = gdf_mun_qualif_merged["geometry"].simplify(tolerance=0.01)
-
-# 6. Converter o GeoDataFrame merged de volta para um dict GeoJSON
-municipios_com_qualificacao_merged = json.loads(
-    gdf_mun_qualif_merged.to_json()
-)
-
-#----------------------------------------------------#
+    return json.loads(gdf_merged.to_json())
 
 
 # ---------------- Filtros sincronizados ---------------- #
@@ -611,10 +643,20 @@ else:
 def filtra_municipios_geojson(geojson, lista_mun):
     if not lista_mun:
         return geojson # retorna o geojson original se a lista estiver vazia
-    feats = [ # filtra as feições
-        f for f in geojson["features"]
-        if f["properties"].get("NM_MUN") in lista_mun # verifica se o município está na lista
-    ]
+    
+    # Filtra as feições baseadas na propriedade 'has_qualif' (mais seguro que nome)
+    # Se 'has_qualif' não existir (caso de erro), faz fallback para o nome
+    feats = []
+    for f in geojson["features"]:
+        props = f.get("properties", {})
+        # Se temos a marcação de qualificação (vinda do merge por ID), usamos ela
+        if "has_qualif" in props:
+            if props["has_qualif"] == 1:
+                feats.append(f)
+        # Fallback: se não tiver a propriedade, tenta filtrar por nome (legado)
+        elif props.get("NM_MUN") in lista_mun:
+            feats.append(f)
+            
     return { # retorna o geojson filtrado
         "type": geojson["type"],
         "name": geojson.get("name", "") + "_filtrado",
@@ -623,16 +665,33 @@ def filtra_municipios_geojson(geojson, lista_mun):
     }
 
 # aplica a filtragem aos geojsons de municípios com qualificação e choropleth
-# usando a lista de municípios filtrados {mun_filtrados}
+# Recalcula o GeoJSON Dinâmico base nos filtros
+geo_data_filtrada = preparar_dados_mapa(df_filtrado, gdf_base_municipios)
+
+# Filtro visual (se quisermos esconder as geometrias que não tem cursos)
+# O código original usava "filtra_municipios_geojson" baseado em nomes.
+# Como agora temos "has_qualif" dinâmico, podemos usar isso se quisermos.
+# Mas para consistência com o pedido do usuário (filtrar o mapa), vamos manter a lógica de SOMENTE mostrar municípios do filtro?
+# O código anterior filtrava geometry...
+# Vamos aplicar a função filtra_municipios_geojson no resultado dinâmico.
+
+# Ajuste: A função filtra_municipios_geojson trabalha com properties['NM_MUN']. Precisa gartantir que o merge manteve essa coluna.
+# (GPD merge maintaint columns of left df by default).
+
 municipios_com_qualificacao_filtrado = filtra_municipios_geojson(
-    municipios_com_qualificacao_merged, # Corrigido: Usar o GeoJSON COM dados (merged) para o tooltip funcionar
+    geo_data_filtrada, 
     mun_filtrados,
 )
 
 municipios_choropleth_filtrado = filtra_municipios_geojson(
-    municipios_com_qualificacao_merged,
+    geo_data_filtrada,
     mun_filtrados,
 )
+
+# Atualiza colormap dinamicamente baseado nos dados visíveis?
+# Ou mantemos estático 0-100? Melhor estático 0-100 para consistência visual.
+colormap_conclusao = linear.YlGn_09.scale(0, 100)
+colormap_conclusao.caption = "Percentual de conclusão (%)"
 
 # Se nenhum filtro ativo, reseta o estado do mapa para o centro e zoom iniciais
 if not algum_filtro_ativo:
@@ -678,17 +737,15 @@ with col_mapa:
         tooltip_municipios = folium.GeoJsonTooltip(
             fields=[
             "NM_MUN",
-            # "has_qualif",
-            # "total_turmas",
-            # "total_concludentes",
-            # "percentual_conclusao",
+            "total_turmas",
+            "total_concludentes",
+            "percentual_conclusao",
             ],
             aliases=[
                 "Município:",
-                # "Possui Qualificação:",
-                # "Total de turmas:",
-                # "Total de concluintes:",
-                # "% de conclusão:",
+                "Total de turmas:",
+                "Total de concluintes:",
+                "% de conclusão:",
             ],
             localize=True,
         )
