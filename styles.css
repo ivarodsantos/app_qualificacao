@@ -266,3 +266,13 @@ div[data-testid="column"] {
     padding-left: 0.9rem !important;
     padding-right: 0.9rem !important;
 }
+
+/* ======== 8. Ajuste de espaçamento do Slider ======== */
+div[data-testid="stSidebar"] div[data-baseweb="slider"] {
+    margin-top: 1rem;
+    padding-bottom: 2rem !important;
+    padding-left: 14px !important;
+    /* Espaço extra forçado */
+    padding-right: 14px !important;
+    /* Espaço extra forçado */
+}

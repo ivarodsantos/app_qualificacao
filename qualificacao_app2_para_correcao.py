@@ -9,7 +9,6 @@ import branca.colormap as cm
 import copy
 import altair as alt
 from folium.plugins import Draw
-import base64
 
 from branca.colormap import linear
 from branca.element import MacroElement, Template
@@ -83,14 +82,6 @@ def load_data():
 
 cursos_df, qtd_beneficiarios_cozinhas_df, qtd_cozinhas_df, df_kitchen = load_data()
 
-# Filtro de status indesejados solicitado pelo usuário
-status_indesejados = ["Turma Cancelada", "Não iniciado", "Certificado entregue", "Adiado"]
-if "STATUS" in cursos_df.columns:
-    # Remove espaços em branco extras para garantir o match
-    cursos_df["STATUS"] = cursos_df["STATUS"].astype(str).str.strip()
-    cursos_df = cursos_df[~cursos_df["STATUS"].isin(status_indesejados)]
-
-
 
 geojsons = [
     "data/municipios_latlon.geojson",
@@ -133,18 +124,6 @@ cozinha_csf_icon = folium.CustomIcon(
 # Mesclar dados dos cursos com dados da plataforma
 merged_df = merge_id_plataforma(cursos_df, df_kitchen)
 
-
-# -------------------------------------------------------------
-# Cálculo da taxa relativa de conclusão (GLOBAL)
-# -------------------------------------------------------------
-if "VAGAS OFERTADAS" in merged_df.columns and "CONCLUDENTES" in merged_df.columns:
-    merged_df["TAXA_CONCLUSAO"] = (
-        merged_df["CONCLUDENTES"] / merged_df["VAGAS OFERTADAS"]
-    ) * 100
-    # Evitar valores >100% ou negativos
-    merged_df["TAXA_CONCLUSAO"] = merged_df["TAXA_CONCLUSAO"].clip(0, 100)
-    merged_df["TAXA_CONCLUSAO"] = merged_df["TAXA_CONCLUSAO"].fillna(0)
-    
 # Quantidade de cursos concluidos
 # merged_df[merged_df['STATUS'] == "Concluído"]['CURSO'].count()
 
@@ -158,8 +137,8 @@ merged_df_agg = merged_df.groupby(
     total_concludentes=pd.NamedAgg(column="CONCLUDENTES", aggfunc="sum"),
     percentual_conclusao=pd.NamedAgg(
         column="CONCLUDENTES", 
-        aggfunc=lambda x: round((x.sum() / merged_df.loc[x.index, "VAGAS OFERTADAS"].sum()) * 100, 2) 
-        if merged_df.loc[x.index, "VAGAS OFERTADAS"].sum() > 0 else 0
+        aggfunc=lambda x: round((x.sum() / merged_df.loc[x.index, "INSCRITOS"].sum()) * 100, 2) 
+        if merged_df.loc[x.index, "INSCRITOS"].sum() > 0 else 0
     ),
 ).reset_index()
 
@@ -211,11 +190,7 @@ colormap_conclusao = linear.YlGn_09.scale(percentual_min, percentual_max)
 colormap_conclusao.caption = "Percentual de conclusão (%)"
 
 
-# 5. Simplificar geometrias para performance (reduzir vertex count)
-# Tolerance 0.01 graus é aprox 1km, ajuste fino para manter visual ok mas leve
-gdf_mun_qualif_merged["geometry"] = gdf_mun_qualif_merged["geometry"].simplify(tolerance=0.01)
-
-# 6. Converter o GeoDataFrame merged de volta para um dict GeoJSON
+# 5. Converter o GeoDataFrame merged de volta para um dict GeoJSON
 municipios_com_qualificacao_merged = json.loads(
     gdf_mun_qualif_merged.to_json()
 )
@@ -229,11 +204,10 @@ municipios_com_qualificacao_merged = json.loads(
 # ---------------- Filtros sincronizados ---------------- #
 
 base_df = merged_df.copy()
-
 col_area = "ÁREA DO CURSO\n(automático)"
 
-def filtrar_dados(df, municipios, executoras, cursos, areas, taxa_range):
-    """Filtra o DataFrame com base nas listas de opções selecionadas e range de taxa."""
+def filtrar_dados(df, municipios, executoras, cursos, areas):
+    """Filtra o DataFrame com base nas listas de opções selecionadas."""
     df_result = df.copy()
     if municipios:
         df_result = df_result[df_result["Nome_Município"].isin(municipios)]
@@ -243,16 +217,6 @@ def filtrar_dados(df, municipios, executoras, cursos, areas, taxa_range):
         df_result = df_result[df_result["CURSO"].isin(cursos)]
     if areas:
         df_result = df_result[df_result[col_area].isin(areas)]
-    
-    # Filtro por faixa de conclusão
-    if taxa_range:
-        min_t, max_t = taxa_range
-        if "TAXA_CONCLUSAO" in df_result.columns:
-            df_result = df_result[
-                (df_result["TAXA_CONCLUSAO"] >= min_t) & 
-                (df_result["TAXA_CONCLUSAO"] <= max_t)
-            ]
-            
     return df_result
 
 # 1) Ler seleções atuais do session_state (antes de criar os widgets)
@@ -260,27 +224,15 @@ sel_mun_prev   = st.session_state.get("f_mun", [])
 sel_exec_prev  = st.session_state.get("f_exec", [])
 sel_curso_prev = st.session_state.get("f_curso", [])
 sel_area_prev  = st.session_state.get("f_area", [])
-sel_taxa_prev  = st.session_state.get("f_taxa", (0, 100))
 
-# 2) Montar df_opcoes "Context-Aware"
-# Para cada widget, filtramos pelos OUTROS critérios, mas ignoramos a seleção DO PRÓPRIO widget.
-# Isso evita que as opções desapareçam ao selecionar um item.
+# 2) Montar df_opcoes aplicando essas seleções
+df_opcoes = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, sel_area_prev)
 
-# Opções de Municípios (respeita exec, curso, area, taxa; ignora mun)
-df_mun_ops = filtrar_dados(base_df, [], sel_exec_prev, sel_curso_prev, sel_area_prev, sel_taxa_prev)
-mun_options = sorted(df_mun_ops["Nome_Município"].dropna().unique().tolist())
-
-# Opções de Executoras (respeita mun, curso, area, taxa; ignora exec)
-df_exec_ops = filtrar_dados(base_df, sel_mun_prev, [], sel_curso_prev, sel_area_prev, sel_taxa_prev)
-exec_options = sorted(df_exec_ops["EXECUTORA"].dropna().unique().tolist())
-
-# Opções de Cursos (respeita mun, exec, area, taxa; ignora curso)
-df_curso_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, [], sel_area_prev, sel_taxa_prev)
-curso_options = sorted(df_curso_ops["CURSO"].dropna().unique().tolist())
-
-# Opções de Áreas (respeita mun, exec, curso, taxa; ignora area)
-df_area_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, [], sel_taxa_prev)
-area_options = sorted(df_area_ops[col_area].dropna().unique().tolist())
+# 3) Opções disponíveis (AGORA a partir de df_opcoes → sincronizadas)
+mun_options   = sorted(df_opcoes["Nome_Município"].dropna().unique().tolist())
+exec_options  = sorted(df_opcoes["EXECUTORA"].dropna().unique().tolist())
+curso_options = sorted(df_opcoes["CURSO"].dropna().unique().tolist())
+area_options  = sorted(df_opcoes[col_area].dropna().unique().tolist())
 
 #-------------- Layout do Streamlit --------------#
 st.sidebar.image('icons/neg_color.png', use_container_width=True)
@@ -309,22 +261,11 @@ selected_cursos = st.sidebar.multiselect(
     key="f_curso",
 )
 
-
 selected_areas_qualificacao = st.sidebar.multiselect(
     "Selecione as áreas de qualificação:",
     options=area_options,
     default=[v for v in sel_area_prev if v in area_options],
     key="f_area",
-)
-
-# Slider de Taxa de Conclusão
-st.sidebar.markdown("<br/>", unsafe_allow_html=True)
-selected_taxa_range = st.sidebar.slider(
-    "Faixa de Taxa de Conclusão (%):",
-    min_value=0,
-    max_value=100,
-    value=st.session_state.get("f_taxa", (0, 100)),
-    key="f_taxa"
 )
 
 # 5) Verifica se algum filtro foi aplicado
@@ -333,7 +274,6 @@ algum_filtro_ativo = any([
     selected_executoras,
     selected_cursos,
     selected_areas_qualificacao,
-    selected_taxa_range != (0, 100)
 ])
 
 # 6) Aplica as seleções ATUAIS a toda a base para montar df_filtrado
@@ -343,21 +283,27 @@ if algum_filtro_ativo:
         selected_municipios, 
         selected_executoras, 
         selected_cursos, 
-        selected_areas_qualificacao,
-        selected_taxa_range
+        selected_areas_qualificacao
     )
 else:
     df_filtrado = base_df.copy()
 #----------------------------------------------------#
 
 
-
 # -------------------------------------------------------------
 # Cálculo da taxa relativa de conclusão
 # -------------------------------------------------------------
-# (Previamente calculado globalmente para permitir filtro)
-if "TAXA_CONCLUSAO" not in df_filtrado.columns:
-     st.warning("Coluna TAXA_CONCLUSAO não calculada.")
+if "VAGAS OFERTADAS" in df_filtrado.columns and "CONCLUDENTES" in df_filtrado.columns:
+
+    df_filtrado["TAXA_CONCLUSAO"] = (
+        df_filtrado["CONCLUDENTES"] / df_filtrado["VAGAS OFERTADAS"]
+    ) * 100
+
+    # Evitar valores >100% ou negativos
+    df_filtrado["TAXA_CONCLUSAO"] = df_filtrado["TAXA_CONCLUSAO"].clip(0, 100)
+
+else:
+    st.warning("Colunas VAGAS OFERTADAS ou CONCLUDENTES não foram encontradas no DataFrame.")
 
 
 
@@ -371,18 +317,17 @@ col_data_inicio = "DATA INÍCIO"
 col_data_termino = "DATA TÉRMINO"
 
 if col_data_inicio in df_filtrado.columns and col_data_termino in df_filtrado.columns:
-    # Converter para datetime (uma vez por rerun) e remover hora (normalize)
+    # Converter para datetime (uma vez por rerun)
     df_filtrado[col_data_inicio] = pd.to_datetime(
         df_filtrado[col_data_inicio],
         dayfirst=True,
         errors="coerce",
-    ).dt.normalize()
-    
+    )
     df_filtrado[col_data_termino] = pd.to_datetime(
         df_filtrado[col_data_termino],
         dayfirst=True,
         errors="coerce",
-    ).dt.normalize()
+    )
 
     # Criar campos derivados
     df_filtrado["DURACAO_DIAS"] = (
@@ -393,64 +338,33 @@ if col_data_inicio in df_filtrado.columns and col_data_termino in df_filtrado.co
     df_filtrado["MES_INICIO"] = df_filtrado[col_data_inicio].dt.month
     df_filtrado["ANO_MES_INICIO"] = df_filtrado[col_data_inicio].dt.to_period("M")
 
-    # ------------------- Filtro temporal (Data Início / Data Fim) na sidebar -------------------
+    # ------------------- Filtro temporal na sidebar -------------------
     datas_validas = df_filtrado[col_data_inicio].dropna()
 
     if not datas_validas.empty:
-        # Definir limites baseados nos dados
-        min_dataset = datas_validas.min().date()
-        max_dataset = datas_validas.max().date()
-        
-        st.sidebar.markdown("**Período de Início dos Cursos:**")
-        c_data1, c_data2 = st.sidebar.columns(2)
-        
-        with c_data1:
-            data_inicial = st.date_input(
-                "De:",
-                value=min_dataset,
-                min_value=min_dataset,
-                max_value=max_dataset,
-                format="DD/MM/YYYY"
-            )
-            
-        with c_data2:
-            data_final = st.date_input(
-                "Até:",
-                value=max_dataset,
-                min_value=min_dataset, # Permite selecionar desde o inicio
-                max_value=max_dataset,
-                format="DD/MM/YYYY"
-            )
-            
-        # Converter para Timestamp normalizado (00:00:00) para comparação
-        ts_inicial = pd.Timestamp(data_inicial).normalize()
-        ts_final = pd.Timestamp(data_final).normalize()
-        
-        # Validar se o usuário inverteu as datas (UX: corrige ou avisa? melhor filtrar direito)
-        if ts_inicial > ts_final:
-            st.sidebar.error("Data inicial maior que a final!")
-            # Fallback seguro: não filtra nada ou inverte? 
-            # Vamos travar o filtro para não retornar nada ou retornar vazio
-            mascara_periodo = [False] * len(df_filtrado)
-        else:
-            mascara_periodo = (
-                (df_filtrado[col_data_inicio] >= ts_inicial) & 
-                (df_filtrado[col_data_inicio] <= ts_final)
-            )
+        min_data = datas_validas.min().date()
+        max_data = datas_validas.max().date()
 
-        # Checkbox para incluir sem data
-        incluir_sem_data_chk = st.sidebar.checkbox(
-            "Incluir cursos sem data?",
-            value=True,
-            help="Mantém cursos sem data de início cadastrada."
+        periodo = st.sidebar.date_input(
+            "Período de início dos cursos:",
+            value=(min_data, max_data),
+            help="Filtra os cursos pelo intervalo de DATA INÍCIO.",
         )
 
-        if incluir_sem_data_chk:
-             mascara_final = mascara_periodo | df_filtrado[col_data_inicio].isna()
+        # O date_input pode retornar uma tupla (início, fim) ou uma única data
+        if isinstance(periodo, tuple) and len(periodo) == 2:
+            data_ini, data_fim = periodo
         else:
-             mascara_final = mascara_periodo
-             
-        df_filtrado = df_filtrado[mascara_final]
+            data_ini = periodo
+            data_fim = periodo
+
+        data_ini = pd.to_datetime(data_ini)
+        data_fim = pd.to_datetime(data_fim)
+
+        df_filtrado = df_filtrado[
+            (df_filtrado[col_data_inicio] >= data_ini)
+            & (df_filtrado[col_data_inicio] <= data_fim)
+        ]
 else:
     st.warning(
         "Colunas de data não encontradas no df_filtrado. "
@@ -459,7 +373,11 @@ else:
 
     
     
-# (Bloco de conversão redundante removido pois já foi tratado acima)
+df_filtrado["DATA INÍCIO"] = pd.to_datetime(df_filtrado["DATA INÍCIO"], dayfirst=True, errors="coerce")
+df_filtrado["DATA TÉRMINO"] = pd.to_datetime(df_filtrado["DATA TÉRMINO"], dayfirst=True, errors="coerce")
+df_filtrado["ANO_INICIO"] = df_filtrado["DATA INÍCIO"].dt.year
+df_filtrado["MES_INICIO"] = df_filtrado["DATA INÍCIO"].dt.month
+df_filtrado["DURACAO_DIAS"] = (df_filtrado["DATA TÉRMINO"] - df_filtrado["DATA INÍCIO"]).dt.days
 
     
     
@@ -475,36 +393,19 @@ df_metrics = df_filtrado.groupby(
     percentual_conclusao=pd.NamedAgg(
         column="CONCLUDENTES",
         aggfunc=lambda x: round(
-            (x.sum() / df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum()) * 100, 2
-        ) if df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum() > 0 else 0
+            (x.sum() / df_filtrado.loc[x.index, "INSCRITOS"].sum()) * 100, 2
+        ) if df_filtrado.loc[x.index, "INSCRITOS"].sum() > 0 else 0
     ),
 ).reset_index()
 
-
-# Cálculo direto do df_filtrado para evitar perda de dados por NaN no groupby
-total_geral_turmas = df_filtrado.shape[0] # Considera cada linha uma turma
-total_geral_vagas = df_filtrado["VAGAS OFERTADAS"].sum()
-total_geral_inscritos = df_filtrado["INSCRITOS"].sum()
-total_geral_desistentes = df_filtrado["DESISTENTES"].sum()
-total_geral_concludentes = df_filtrado["CONCLUDENTES"].sum()
-
-# Cálculo direto (sem limitação, conforme solicitado pelo usuário)
-concludentes_ajustados = total_geral_concludentes
-
+total_geral_turmas = df_metrics["total_turmas"].sum()
+total_geral_vagas = df_metrics["total_vagas_ofertadas"].sum()
+total_geral_inscritos = df_metrics["total_inscritos"].sum()
+total_geral_desistentes = df_metrics["total_desistentes"].sum()
+total_geral_concludentes = df_metrics["total_concludentes"].sum()
 percentual_geral_conclusao = round(
-    (concludentes_ajustados / total_geral_vagas) * 100, 2
-) if total_geral_vagas > 0 else 0
-
-# Métricas de Status
-# Robustez para encoding: verificar startsWith ou contains se necessário, 
-# mas assumindo utf-8 correto:
-turmas_em_execucao = df_filtrado[
-    df_filtrado["STATUS"].astype(str).str.strip() == "Em execução"
-].shape[0]
-
-turmas_concluidas = df_filtrado[
-    df_filtrado["STATUS"].astype(str).str.strip() == "Concluído"
-].shape[0]
+    (total_geral_concludentes / total_geral_inscritos) * 100, 2
+) if total_geral_inscritos > 0 else 0
 
 
 df_filtrado.rename(
@@ -533,8 +434,8 @@ df_metrics_exec = df_filtrado.groupby(
     percentual_conclusao=pd.NamedAgg(
         column="CONCLUDENTES",
         aggfunc=lambda x: round(
-            (x.sum() / df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum()) * 100, 2
-        ) if df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum() > 0 else 0
+            (x.sum() / df_filtrado.loc[x.index, "INSCRITOS"].sum()) * 100, 2
+        ) if df_filtrado.loc[x.index, "INSCRITOS"].sum() > 0 else 0
     ),
 ).reset_index()
 
@@ -543,15 +444,9 @@ total_geral_vagas_exec = df_metrics_exec["total_vagas_ofertadas"].sum()
 total_geral_inscritos_exec = df_metrics_exec["total_inscritos"].sum()
 total_geral_desistentes_exec = df_metrics_exec["total_desistentes"].sum()
 total_geral_concludentes_exec = df_metrics_exec["total_concludentes"].sum()
-
-# Cálculo seguro também para as métricas agregadas por executora
-# Nota: O df_metrics_exec já está agregado, então para ser preciso precisaríamos ajustar na agragação. 
-# Mas como estamos olhando para os totais gerais aqui:
-percentual_geral_conclusao_exec = percentual_geral_conclusao # Reutiliza a métrica global correta
-# Ou se quisermos manter independente (mas consistente):
-# percentual_geral_conclusao_exec = round(
-#     (concludentes_ajustados / total_geral_inscritos) * 100, 2
-# ) if total_geral_inscritos > 0 else 0
+percentual_geral_conclusao_exec = round(
+    (total_geral_concludentes_exec / total_geral_inscritos_exec) * 100, 2
+) if total_geral_inscritos_exec > 0 else 0
 #----------------------------------------------------#
 
     
@@ -625,7 +520,7 @@ def filtra_municipios_geojson(geojson, lista_mun):
 # aplica a filtragem aos geojsons de municípios com qualificação e choropleth
 # usando a lista de municípios filtrados {mun_filtrados}
 municipios_com_qualificacao_filtrado = filtra_municipios_geojson(
-    municipios_com_qualificacao_merged, # Corrigido: Usar o GeoJSON COM dados (merged) para o tooltip funcionar
+    municipios_com_qualificacao,
     mun_filtrados,
 )
 
@@ -641,7 +536,6 @@ if not algum_filtro_ativo:
 #----------------------------------------------------#
 
 
-# Mapa interativo
 # Mapa interativo
 # st.markdown(
 #     "<h2 style='color:#6c91c8; font-weight:600; margin:0'>"
@@ -660,9 +554,6 @@ with col_mapa:
         "</h4>",
         unsafe_allow_html=True,
     )
-    
-    # Chamada do fragmento (somente ele reroda nos cliques do mapa)
-    # @st.fragment
     # Inserir o fragmento do mapa
     @st.fragment
     def mapa_fragment(
@@ -709,7 +600,6 @@ with col_mapa:
             title="Expand me",
             title_cancel="Exit me",
             force_separate_button=True,
-            force_separate_button_title="Expandir",
         ).add_to(m)
         
         
@@ -882,11 +772,6 @@ with col_metricas:
         st.metric("📘 Turmas", format_int_br(total_geral_turmas))
 
     with g1c2:
-        # (Lógica de debug movida para seção de diagnóstico abaixo)
-
-
-        # Se preferir contar por NOME (159), mude para 'Nome_Município'
-        # Se preferir contar por CÓDIGO (160), mantenha 'Código Município Completo'
         st.metric(
             "🗺️ Municípios atendidos",
             format_int_br(df_filtrado['Código Município Completo'].nunique()),
@@ -908,24 +793,10 @@ with col_metricas:
         st.metric("👥 Inscritos", format_int_br(total_geral_inscritos))
 
     with g2c2:
-        st.metric("🏅 Concludentes", format_int_br(concludentes_ajustados))
+        st.metric("🏅 Concludentes", format_int_br(total_geral_concludentes))
 
     with g2c3:
-        st.metric(
-            "📈 Conclusão geral (%)", 
-            format_percent_br(percentual_geral_conclusao),
-            help="Cálculo: (Total de Concludentes / Total de Vagas Ofertadas) * 100"
-        )
-        
-    # Grupo 3 – Status das Turmas
-    st.markdown("<br/>", unsafe_allow_html=True)
-    g3c1, g3c2 = st.columns(2) 
-    
-    with g3c1:
-        st.metric("⏳ Turmas em Execução", format_int_br(turmas_em_execucao))
-        
-    with g3c2:
-        st.metric("✅ Turmas Concluídas", format_int_br(turmas_concluidas))
+        st.metric("📈 Conclusão geral (%)", format_percent_br(percentual_geral_conclusao))
 
 #----------------------------------------------------#
 
@@ -1027,7 +898,29 @@ if (
         st.altair_chart(chart_exec, use_container_width=True)
 
 
+#-------------- Gráfico temporal --------------#
 
+df_temporal = (
+    df_filtrado.groupby(df_filtrado["DATA INÍCIO"].dt.to_period("M"))
+    .size()
+    .reset_index(name="qtd_turmas")
+)
+
+df_temporal["DATA"] = df_temporal["DATA INÍCIO"].dt.to_timestamp()
+
+chart = (
+    alt.Chart(df_temporal)
+    .mark_line(point=True)
+    .encode(
+        x=alt.X("DATA:T", title="Período"),
+        y=alt.Y("qtd_turmas:Q", title="Turmas iniciadas"),
+        tooltip=["DATA", "qtd_turmas"]
+    )
+    .properties(height=300, title="Turmas iniciadas por mês")
+)
+
+st.altair_chart(chart, use_container_width=True)
+#----------------------------------------------------#
 
 
 
@@ -1246,80 +1139,8 @@ with col_grafico4:
     )
     st.altair_chart(chart4, use_container_width=True)
     
-# -------------------------------------------------------------------
-# Diagnóstico de Qualidade dos Dados
-# -------------------------------------------------------------------
-with st.expander("⚠️ Diagnóstico de Qualidade dos Dados (Clique para ver)", expanded=False):
-    st.markdown("Verificação automática de inconsistências nos dados carregados.")
-    
-    # 1. Checagem de Concludentes > Inscritos
-    inconsistent_rows = df_filtrado[df_filtrado["CONCLUDENTES"] > df_filtrado["INSCRITOS"]]
-    if not inconsistent_rows.empty:
-        st.error(f"Foram encontradas {len(inconsistent_rows)} turmas com mais Concludentes do que Inscritos.")
-        st.markdown("**Aviso:** *Os indicadores acima exibem os valores reais inseridos na planilha, conforme solicitado, permitindo identificar inconsistências nos dados originais.*")
-        st.dataframe(
-            inconsistent_rows[["CURSO", "Nome_Município", "INSCRITOS", "CONCLUDENTES", "TAXA_CONCLUSAO"]],
-            use_container_width=True
-        )
-    else:
-        st.success("✅ Nenhuma inconsistência de 'Concludentes > Inscritos' encontrada no filtro atual.")
-
-    # 2. Checagem de Múltiplos IDs para mesma cidade
-    df_debug = df_filtrado[["Nome_Município", "Código Município Completo"]].copy()
-    if "Nome_Município" in df_debug.columns:
-        df_debug["Nome_Município"] = df_debug["Nome_Município"].astype(str).str.strip().str.upper()
-        check_dups = df_debug.groupby("Nome_Município")["Código Município Completo"].nunique()
-        dups = check_dups[check_dups > 1]
-        
-        if not dups.empty:
-            st.warning(f"⚠️ Cidades com múltiplos códigos ID encontrados: {dups.index.tolist()}")
-            st.dataframe(df_filtrado[
-                df_filtrado["Nome_Município"].astype(str).str.strip().str.upper().isin(dups.index)
-            ][["Nome_Município", "Código Município Completo"]].drop_duplicates())
-        else:
-            st.success("✅ Nenhum conflito de ID de município encontrado.")
-
-#----------------------------------------------------#
-
-
-# -------------------------------------------------------------------
-# Dados Detalhados e Exportação
-# -------------------------------------------------------------------
-st.markdown("---")
-st.subheader("Dados Detalhados")
-
-# Mostra dataframe filtrado
-# Mostra dataframe filtrado (removendo colunas de índice/unnamed se existirem)
-cols_to_show = [c for c in df_filtrado.columns if "Unnamed" not in c]
-
-st.dataframe(
-    df_filtrado[cols_to_show], 
-    use_container_width=True,
-    hide_index=True, # Garante que o índice numérico do pandas também não apareça
-    column_config={
-        "TAXA_CONCLUSAO": st.column_config.NumberColumn(
-            "Taxa Conclusão (%)",
-            format="%.2f %%"
-        )
-    }
-)
-
-# Botão de download
-@st.cache_data
-def convert_df(df):
-    return df.to_csv(index=False, sep=";").encode('utf-8')
-
-csv = convert_df(df_filtrado)
-
-st.download_button(
-    label="📥 Baixar Dados Filtrados (CSV)",
-    data=csv,
-    file_name='dados_qualificacao_filtrados.csv',
-    mime='text/csv',
-    key='download-csv'
-)
-
-    
 
 
 #----------------------------------------------------#
+
+
