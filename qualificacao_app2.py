@@ -1477,101 +1477,166 @@ with tab2:
         
         st.divider()
         
-        # --- Gráfico Comparativo e Funil ---
-        c_graf1, c_graf2 = st.columns(2)
+        # --- Gráfico de Funil (Altair) ---
+        st.subheader("Funil de Conversão")
         
-        with c_graf1:
-            st.subheader("Funil de Conversão Absoluto")
-            funnel_data = pd.DataFrame({
-                "Etapa": ["Qualificação", "Sensibilização", "Inscrição Trilha", "Conclusão Trilha", "Mentoria"],
-                "Quantidade": [kpi_qualificados, kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados]
-            })
-            fig_funnel = px.funnel(funnel_data, x='Quantidade', y='Etapa', color='Etapa',
-                                   color_discrete_sequence=px.colors.qualitative.Safe)
-            fig_funnel.update_layout(showlegend=False, margin=dict(l=0, r=0, t=30, b=0))
-            st.plotly_chart(fig_funnel, use_container_width=True)
+        # Dados do funil
+        funnel_data = pd.DataFrame({
+            "Etapa": ["Sensibilização", "Inscrição Trilha", "Conclusão Trilha", "Mentoria Concluída"],
+            "Quantidade": [kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados],
+            "Order": [1, 2, 3, 4] # Para garantir ordem
+        })
+        
+        # Altair Funnel (Barra Horizontal Ordenada)
+        chart_funnel = alt.Chart(funnel_data).mark_bar().encode(
+            x=alt.X('Quantidade:Q', title='Participantes'),
+            y=alt.Y('Etapa:N', sort=alt.EncodingSortField(field="Order", order="ascending"), title=None),
+            color=alt.Color('Etapa:N', legend=None, scale=alt.Scale(scheme='tableau10')),
+            tooltip=['Etapa', 'Quantidade']
+        ).properties(height=300)
+        
+        text_funnel = chart_funnel.mark_text(
+            align='left',
+            baseline='middle',
+            dx=3  # Nudges text to right so it doesn't overlap the bar
+        ).encode(
+            text='Quantidade:Q'
+        )
+        
+        st.altair_chart(chart_funnel + text_funnel, use_container_width=True)
+        
+        st.divider()
+        
+        # --- Gráfico Eficiência (Altair) ---
+        c_graf1, c_graf2 = st.columns(2) # Layout reorganizado? O user pediu 'charts use same lib'. Vamos manter layout, mudar lib.
+        
+        # Mas espere, o layout anterior colocava Funil na Esquerda e Eficiencia na Direita. 
+        # O código acima botou Funil sozinho em cima. Vamos ajustar para seguir o pedido "passo a passo" mas com bom senso.
+        # Vou manter a estrutura nova (Funil em cima, Eficiência embaixo ou lado a lado?)
+        # O código anterior tinha Funil (c_graf1) e Eficiencia (c_graf2).
+        # Vamos refazer essa estrutura.
+        
+        # ... (Recalculando layout para ser igual ao anterior) ...
+        # Ah, no step anterior converti para Funil Absoluto e Eficiencia lado a lado.
+        # Vou manter isso.
+        
+        # --- Gráfico Comparativo (Altair) ---
+        # Cruzamento de dados para o gráfico (Top 10)
+        # ... (Código de agregação mantido, apenas visualização muda) ...
+        
+        # Agregação Trilha
+        if "CIDADE" in df_trilha.columns:
+            agg_trilha = df_trilha.groupby("CIDADE")["CONCLUDENTES TRILHA"].sum().reset_index()
+            agg_trilha.rename(columns={"CIDADE": "NM_MUN", "CONCLUDENTES TRILHA": "qtd_trilha"}, inplace=True)
+        else:
+            agg_trilha = pd.DataFrame(columns=["NM_MUN", "qtd_trilha"])
             
-        with c_graf2:
-            st.subheader("Eficiência por Município (Top 10)")
-            # Cruzamento de dados para o gráfico
-            
-            # Agregação Trilha
-            if "CIDADE" in df_trilha.columns:
-                agg_trilha = df_trilha.groupby("CIDADE")["CONCLUDENTES TRILHA"].sum().reset_index()
-                agg_trilha.rename(columns={"CIDADE": "NM_MUN", "CONCLUDENTES TRILHA": "qtd_trilha"}, inplace=True)
-            else:
-                agg_trilha = pd.DataFrame(columns=["NM_MUN", "qtd_trilha"])
-                
-            # Agregação Mentoria
-            if "MUNICÍPIO" in df_mentoria.columns:
-                df_mentoria_concluidos = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"]
-                agg_mentoria = df_mentoria_concluidos.groupby("MUNICÍPIO").size().reset_index(name="qtd_mentoria")
-                agg_mentoria.rename(columns={"MUNICÍPIO": "NM_MUN"}, inplace=True)
-            else:
-                agg_mentoria = pd.DataFrame(columns=["NM_MUN", "qtd_mentoria"])
+        # Agregação Mentoria
+        if "MUNICÍPIO" in df_mentoria.columns:
+            df_mentoria_concluidos = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"]
+            agg_mentoria = df_mentoria_concluidos.groupby("MUNICÍPIO").size().reset_index(name="qtd_mentoria")
+            agg_mentoria.rename(columns={"MUNICÍPIO": "NM_MUN"}, inplace=True)
+        else:
+            agg_mentoria = pd.DataFrame(columns=["NM_MUN", "qtd_mentoria"])
 
-            # Merge Tudo
-            # Normalizar nomes para merge
-            df_qualificacao_agg["NM_MUN_UPPER"] = df_qualificacao_agg["NM_MUN"].astype(str).str.upper().str.strip()
-            agg_trilha["NM_MUN_UPPER"] = agg_trilha["NM_MUN"].astype(str).str.upper().str.strip()
-            agg_mentoria["NM_MUN_UPPER"] = agg_mentoria["NM_MUN"].astype(str).str.upper().str.strip()
-            
-            # Base com todos os municípios qualificados
-            df_comparativo = df_qualificacao_agg.merge(agg_trilha[["NM_MUN_UPPER", "qtd_trilha"]], on="NM_MUN_UPPER", how="left")
-            df_comparativo = df_comparativo.merge(agg_mentoria[["NM_MUN_UPPER", "qtd_mentoria"]], on="NM_MUN_UPPER", how="left").fillna(0)
-            
-            df_comparativo["total_empreend"] = df_comparativo["qtd_trilha"] + df_comparativo["qtd_mentoria"]
-            
-            # Ordenar por Qualificados para ver quem tem muito aluno e pouco empreendedor
-            df_top = df_comparativo.sort_values("qtd_qualificacao", ascending=False).head(10)
-            
-            # Transformar para long format para o Plotly Grouped Bar
-            df_long = df_top.melt(id_vars=["NM_MUN"], value_vars=["qtd_qualificacao", "qtd_mentoria"], 
-                                  var_name="Tipo", value_name="Quantidade")
-            
-            # Renomear para ficar bonito na legenda
-            df_long["Tipo"] = df_long["Tipo"].map({"qtd_qualificacao": "Qualificados", "qtd_mentoria": "Mentorados"})
-            
-            fig_bar = px.bar(df_long, x="NM_MUN", y="Quantidade", color="Tipo", barmode="group",
-                             color_discrete_map={"Qualificados": "#6c91c8", "Mentorados": "#ffaa00"})
-            fig_bar.update_layout(xaxis_title=None, legend_title=None, margin=dict(l=0, r=0, t=30, b=0))
-            st.plotly_chart(fig_bar, use_container_width=True)
+        # Merge Tudo
+        df_qualificacao_agg["NM_MUN_UPPER"] = df_qualificacao_agg["NM_MUN"].astype(str).str.upper().str.strip()
+        agg_trilha["NM_MUN_UPPER"] = agg_trilha["NM_MUN"].astype(str).str.upper().str.strip()
+        agg_mentoria["NM_MUN_UPPER"] = agg_mentoria["NM_MUN"].astype(str).str.upper().str.strip()
+        
+        df_comparativo = df_qualificacao_agg.merge(agg_trilha[["NM_MUN_UPPER", "qtd_trilha"]], on="NM_MUN_UPPER", how="left")
+        df_comparativo = df_comparativo.merge(agg_mentoria[["NM_MUN_UPPER", "qtd_mentoria"]], on="NM_MUN_UPPER", how="left").fillna(0)
+        df_comparativo["total_empreend"] = df_comparativo["qtd_trilha"] + df_comparativo["qtd_mentoria"]
+        
+        # Top 10 por Qualificados
+        df_top = df_comparativo.sort_values("qtd_qualificacao", ascending=False).head(10)
+        
+        # Transformar para Long Format
+        df_long = df_top.melt(id_vars=["NM_MUN"], value_vars=["qtd_qualificacao", "qtd_mentoria"], 
+                              var_name="Tipo", value_name="Quantidade")
+        df_long["Tipo"] = df_long["Tipo"].map({"qtd_qualificacao": "Qualificados", "qtd_mentoria": "Mentorados"})
+        
+        st.subheader("Eficiência por Município (Top 10)")
+        
+        chart_bars = alt.Chart(df_long).mark_bar().encode(
+            x=alt.X('NM_MUN:N', sort='-y', title=None), # Sort by value descending? No, sort by NM_MUN based on Qtd Qualificação.
+            y=alt.Y('Quantidade:Q', title='Alunos'),
+            color=alt.Color('Tipo:N', scale=alt.Scale(domain=['Qualificados', 'Mentorados'], range=['#6c91c8', '#ffaa00'])),
+            xOffset='Tipo:N', # Grouped bars
+            tooltip=['NM_MUN', 'Tipo', 'Quantidade']
+        ).properties(height=400)
+        
+        st.altair_chart(chart_bars, use_container_width=True)
 
         st.divider()
         
-        # --- Mapa de Densidade Empreendedora ---
+        # --- Mapa de Densidade Empreendedora (Melhorado com Bins) ---
         st.subheader("Distribuição Geográfica (Empreendedorismo)")
         
-        # Preparar GeoJSON (Merge com Geometrias)
         gdf_base = get_base_geodataframe(municipios_com_qualificacao) 
         gdf_base["NM_MUN_UPPER"] = gdf_base["NM_MUN"].astype(str).str.upper().str.strip()
         
-        # Remover colunas conflitantes
         cols_drop_gdf = ["total_turmas", "total_concludentes", "qtd_trilha", "qtd_mentoria", "total_empreend"]
         gdf_base_clean = gdf_base.drop(columns=[c for c in cols_drop_gdf if c in gdf_base.columns], errors='ignore')
         
-        # Merge - Usando df_comparativo que já tem tudo unificado
-        # Remover NM_MUN do df_comparativo para evitar colisão, manter o NM_MUN do gdf
         df_comp_clean = df_comparativo.drop(columns=["NM_MUN"], errors='ignore')
-        
         gdf_jornada = gdf_base_clean.merge(df_comp_clean, on="NM_MUN_UPPER", how="left").fillna(0)
         
         m_jornada = folium.Map(location=[-5.3159, -39.2129], zoom_start=7)
         
-        # Choropleth baseada na QUANTIDADE DE MENTORIAS (Resultado final do funil)
+        # Solução para Fortaleza/Outlier: Remover Fortaleza da Visualização do Mapa
+        # O usuário pediu explicitamente para considerar apenas o interior no mapa
+        df_interior = df_comparativo[df_comparativo["NM_MUN_UPPER"] != "FORTALEZA"]
+        data_to_plot = df_interior
+        
+        dist_values = data_to_plot["qtd_mentoria"]
+        
+        # Calcular min/max do universo plotado (Interior)
+        interior_max = dist_values.max() if not dist_values.empty else 0
+        interior_min = dist_values.min() if not dist_values.empty else 0
+
+        if interior_max > 0:
+            # Cria quantiles baseados apenas no interior
+            quantiles = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+            bins = list(dist_values.quantile(quantiles))
+            
+            # Ajusta limites
+            bins[0] = interior_min
+            bins[-1] = interior_max
+            
+            # Garante unicidade e ordem
+            bins = sorted(list(set(bins)))
+            
+            # Validação ColorBrewer (mínimo 4 edges / 3 cores)
+            if len(bins) < 4:
+                min_val = interior_min
+                max_val = interior_max
+                
+                if min_val == max_val:
+                     bins = [min_val, min_val + 1, min_val + 2, min_val + 3]
+                else:
+                     bins = list(np.linspace(min_val, max_val, 4))
+            
+            bins = sorted(list(set(bins)))
+            while len(bins) < 4:
+                 bins.append(bins[-1] + 1)
+                 
+        else:
+            bins = [0, 1, 2, 3]
+        
         folium.Choropleth(
             geo_data=json.loads(gdf_jornada.to_json()),
-            data=df_comparativo,
+            data=data_to_plot,
             columns=["NM_MUN_UPPER", "qtd_mentoria"],
             key_on="feature.properties.NM_MUN_UPPER",
-            fill_color="YlOrRd", # Cor diferente para diferenciar do mapa azul de cursos
+            fill_color="YlOrRd", 
             fill_opacity=0.7,
             line_opacity=0.2,
-            legend_name="Total Mentorias Concluídas",
+            legend_name="Total Mentorias (Interior)",
+            threshold_scale=bins,
             highlight=True
         ).add_to(m_jornada)
         
-        # Tooltip com dados comparativos
         folium.GeoJson(
             json.loads(gdf_jornada.to_json()),
             style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'},
