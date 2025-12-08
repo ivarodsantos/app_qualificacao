@@ -15,6 +15,9 @@ from branca.colormap import linear
 from branca.element import MacroElement, Template
 import plotly.express as px
 
+# Configuração para evitar FutureWarnings do Pandas (Downcasting)
+pd.set_option('future.no_silent_downcasting', True)
+
 @st.cache_data
 def load_jornada_data():
     # Load Trilha
@@ -60,7 +63,8 @@ intervalo = "A:AN"       # lê todas as colunas da aba; ajuste se quiser
 df = carregar_google_sheet_por_aba(link, nome_aba, intervalo)
 
 # Configurações iniciais do Streamlit
-st.set_page_config(layout="wide")
+# Configurações iniciais do Streamlit
+st.set_page_config(layout="wide", page_title="Ceará Sem Fome - Qualificação")
 
 
 # Função para carregar CSS externo
@@ -71,16 +75,35 @@ def load_css(file_name):
 # Carrega o CSS global
 load_css("styles.css")
 
-
-
-
-
-st.markdown(
-    "<h1 style='color:#6c91c8; font-weight:700; margin:0'>"
-    "Qualificação App - Análise de Cursos e Concludentes"
-    "</h1>",
-    unsafe_allow_html=True,
-)
+# =============================================================================
+# HEADER INSTITUCIONAL (Baseado no Slide 1)
+# =============================================================================
+st.markdown("""
+<div style="background-color: var(--azul-gov); padding: 2rem; border-radius: 0 0 15px 15px; margin-bottom: 2rem; color: white;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 300px;">
+            <p style="font-size: 1.2rem; font-weight: 500; margin:0; opacity: 0.9; color: #FFF;">PAINEL DE MONITORAMENTO</p>
+            <h1 style="color: #FFF !important; margin: 0; font-size: 3rem; line-height: 1.1;">
+                CEARÁ<br/>
+                SEM FOME
+            </h1>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                <span style="font-size: 2.5rem; font-weight: 700; color: var(--amarelo-destaque);">+</span>
+                <span style="font-size: 2rem; font-weight: 600; color: var(--amarelo-destaque);">Qualificação e Renda</span>
+            </div>
+        </div>
+        <div style="text-align: right; min-width: 200px;">
+             <!-- Placeholder para logos se necessário, ou apenas texto institucional -->
+             <div style="border-left: 4px solid var(--amarelo-destaque); padding-left: 15px; color: white;">
+                <p style="margin:0; font-size: 0.9rem;">GOVERNO DO ESTADO DO</p>
+                <p style="margin:0; font-size: 1.5rem; font-weight: 800; letter-spacing: 1px;">CEARÁ</p>
+             </div>
+        </div>
+    </div>
+</div>
+<!-- Divisor Colorido Institucional -->
+<div class="custom-divider"></div>
+""", unsafe_allow_html=True)
 
 
 #-------------- Carregamento dos dados --------------#
@@ -727,7 +750,11 @@ with tab1:
     
     # Atualiza colormap dinamicamente baseado nos dados visíveis?
     # Ou mantemos estático 0-100? Melhor estático 0-100 para consistência visual.
-    colormap_conclusao = linear.YlGn_09.scale(0, 100)
+    # Escala personalizada: Amarelo -> Verde (Identidade Visual)
+    colormap_conclusao = cm.LinearColormap(
+        colors=['#FDD835', '#3F8E4D'], 
+        vmin=0, vmax=100
+    )
     colormap_conclusao.caption = "Percentual de conclusão (%)"
     
     # Se nenhum filtro ativo, reseta o estado do mapa para o centro e zoom iniciais
@@ -751,7 +778,7 @@ with tab1:
     
     with col_mapa:
         st.markdown(
-            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "<h4>"
             "Visualização Geoespacial"
             "</h4>",
             unsafe_allow_html=True,
@@ -956,7 +983,7 @@ with tab1:
     
     with col_metricas:
         st.markdown(
-            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "<h4>"
             "Indicadores Gerais"
             "</h4>",
             unsafe_allow_html=True,
@@ -1235,7 +1262,7 @@ with tab1:
     with col_grafico1:
         # Gráfico de barras dos 10 municípios com mais concludentes
         st.markdown(
-            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "<h4>"
             "Top 10 Municípios por Concludentes"
             "</h4>",
             unsafe_allow_html=True,
@@ -1261,7 +1288,7 @@ with tab1:
     with col_grafico2:
         # Gráfico de barras dos 10 cursos com mais turmas
         st.markdown(
-            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "<h4>"
             "Top 10 Cursos por Número de Turmas"
             "</h4>",
             unsafe_allow_html=True,
@@ -1292,7 +1319,7 @@ with tab1:
     with col_grafico3:
         # Gráfico de barras dos 10 municípios com mais concludentes
         st.markdown(
-            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "<h4>"
             "Top 10 Concludentes por Executora"
             "</h4>",
             unsafe_allow_html=True,
@@ -1318,7 +1345,7 @@ with tab1:
     with col_grafico4:
         # Gráfico de barras dos 10 cursos com mais turmas
         st.markdown(
-            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "<h4>"
             "Top 10 Turmas por Executora"
             "</h4>",
             unsafe_allow_html=True,
@@ -1416,78 +1443,184 @@ with tab1:
         
     
     
-    #----------------------------------------------------#
+#----------------------------------------------------#
+# FUNÇÕES DE OTIMIZAÇÃO (CACHE) - JORNADA EMPREENDEDORA
+#----------------------------------------------------#
+
+@st.cache_data
+def compute_jornada_metrics(df_filtrado, df_trilha, df_mentoria, selected_municipios):
+    """
+    Processa todos os indicadores e dataframes da aba Jornada Empreendedora.
+    Retorna um dicionário com os resultados prontos.
+    """
+    # Copia para não alterar originais
+    df_trilha_proc = df_trilha.copy()
+    df_mentoria_proc = df_mentoria.copy()
+    
+    # --- Filtros Específicos da Aba ---
+    if selected_municipios:
+        if "CIDADE" in df_trilha_proc.columns:
+             df_trilha_proc = df_trilha_proc[df_trilha_proc["CIDADE"].isin(selected_municipios)]
+        if "MUNICÍPIO" in df_mentoria_proc.columns:
+             df_mentoria_proc = df_mentoria_proc[df_mentoria_proc["MUNICÍPIO"].isin(selected_municipios)]
+
+    # --- Agregação Qualificação (Nível 0) ---
+    # df_filtrado já vem filtrado pela sidebar
+    df_qualificacao_agg = df_filtrado.groupby("Nome_Município")["CONCLUDENTES"].sum().reset_index()
+    df_qualificacao_agg.rename(columns={"Nome_Município": "NM_MUN", "CONCLUDENTES": "qtd_qualificacao"}, inplace=True)
+    
+    # --- KPIs ---
+    col_sensib = next((c for c in df_trilha_proc.columns if "SENSIBILIZA" in c.upper()), None)
+    kpi_sensib = 0
+    if col_sensib:
+        kpi_sensib = pd.to_numeric(df_trilha_proc[col_sensib], errors='coerce').fillna(0).sum()
+    
+    kpi_inscritos = df_trilha_proc["INSCRITOS TRILHA"].sum() if "INSCRITOS TRILHA" in df_trilha_proc.columns else 0
+    kpi_concluintes_trilha = df_trilha_proc["CONCLUDENTES TRILHA"].sum() if "CONCLUDENTES TRILHA" in df_trilha_proc.columns else 0
+    
+    kpi_mentorados = 0
+    if "STATUS" in df_mentoria_proc.columns:
+         kpi_mentorados = df_mentoria_proc[df_mentoria_proc["STATUS"].astype(str).str.strip().str.lower() == "concluído"].shape[0]
+         
+    kpi_qualificados = df_qualificacao_agg["qtd_qualificacao"].sum()
+    taxa_conversao_global = (kpi_mentorados / kpi_qualificados * 100) if kpi_qualificados > 0 else 0
+
+    # --- Dados Funil ---
+    funnel_data = pd.DataFrame({
+        "Etapa": ["Sensibilização", "Inscrição Trilha", "Conclusão Trilha", "Mentoria Concluída"],
+        "Quantidade": [kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados],
+        "Order": [1, 2, 3, 4]
+    })
+    
+    # --- Dados Comparativos (Merge) ---
+    # Agregação Trilha
+    if "CIDADE" in df_trilha_proc.columns:
+        agg_trilha = df_trilha_proc.groupby("CIDADE")["CONCLUDENTES TRILHA"].sum().reset_index()
+        agg_trilha.rename(columns={"CIDADE": "NM_MUN", "CONCLUDENTES TRILHA": "qtd_trilha"}, inplace=True)
+    else:
+        agg_trilha = pd.DataFrame(columns=["NM_MUN", "qtd_trilha"])
+        
+    # Agregação Mentoria
+    if "MUNICÍPIO" in df_mentoria_proc.columns:
+        df_ment_concl = df_mentoria_proc[df_mentoria_proc["STATUS"].astype(str).str.strip().str.lower() == "concluído"]
+        agg_mentoria = df_ment_concl.groupby("MUNICÍPIO").size().reset_index(name="qtd_mentoria")
+        agg_mentoria.rename(columns={"MUNICÍPIO": "NM_MUN"}, inplace=True)
+    else:
+        agg_mentoria = pd.DataFrame(columns=["NM_MUN", "qtd_mentoria"])
+
+    # Normalização de nomes para Merge
+    df_qualificacao_agg["NM_MUN_UPPER"] = df_qualificacao_agg["NM_MUN"].astype(str).str.upper().str.strip()
+    agg_trilha["NM_MUN_UPPER"] = agg_trilha["NM_MUN"].astype(str).str.upper().str.strip()
+    agg_mentoria["NM_MUN_UPPER"] = agg_mentoria["NM_MUN"].astype(str).str.upper().str.strip()
+    
+    df_comparativo = df_qualificacao_agg.merge(agg_trilha[["NM_MUN_UPPER", "qtd_trilha"]], on="NM_MUN_UPPER", how="left")
+    df_comparativo = df_comparativo.merge(agg_mentoria[["NM_MUN_UPPER", "qtd_mentoria"]], on="NM_MUN_UPPER", how="left").fillna(0)
+    df_comparativo["total_empreend"] = df_comparativo["qtd_trilha"] + df_comparativo["qtd_mentoria"]
+    
+    # Dados para Gráfico de Barras (Top 10)
+    df_top = df_comparativo.sort_values("qtd_qualificacao", ascending=False).head(10)
+    df_long = df_top.melt(id_vars=["NM_MUN"], value_vars=["qtd_qualificacao", "qtd_mentoria"], 
+                          var_name="Tipo", value_name="Quantidade")
+    df_long["Tipo"] = df_long["Tipo"].map({"qtd_qualificacao": "Qualificados", "qtd_mentoria": "Mentorados"})
+
+    return {
+        "kpis": (kpi_qualificados, kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados, taxa_conversao_global),
+        "funnel_data": funnel_data,
+        "df_comparativo": df_comparativo,
+        "df_long": df_long
+    }
+
+@st.cache_data
+def prepare_jornada_map_data(df_comparativo, _municipios_geojson_data):
+    """
+    Prepara o GeoJSON e dados de plotagem para o mapa da Jornada.
+    O argumento _municipios_geojson_data inicia com _ para não ser hashado (assumido constante).
+    """
+    # Prepara GeoDataFrame Base
+    gdf_base = gpd.GeoDataFrame.from_features(_municipios_geojson_data["features"])
+    if "CD_MUN" in gdf_base.columns:
+         gdf_base["CD_MUN"] = gdf_base["CD_MUN"].astype(str).str.zfill(7)
+    
+    gdf_base["NM_MUN_UPPER"] = gdf_base["NM_MUN"].astype(str).str.upper().str.strip()
+    
+    # Limpeza de colunas duplicadas
+    cols_drop_gdf = ["total_turmas", "total_concludentes", "qtd_trilha", "qtd_mentoria", "total_empreend"]
+    gdf_base_clean = gdf_base.drop(columns=[c for c in cols_drop_gdf if c in gdf_base.columns], errors='ignore')
+    
+    # Merge com dados comparativos
+    df_comp_clean = df_comparativo.drop(columns=["NM_MUN"], errors='ignore')
+    gdf_jornada = gdf_base_clean.merge(df_comp_clean, on="NM_MUN_UPPER", how="left").fillna(0)
+    
+    # Dados de Plotagem (Interior apenas)
+    df_interior = df_comparativo[df_comparativo["NM_MUN_UPPER"] != "FORTALEZA"]
+    
+    # Bins Dinâmicos
+    dist_values = df_interior["qtd_mentoria"]
+    interior_max = dist_values.max() if not dist_values.empty else 0
+    interior_min = dist_values.min() if not dist_values.empty else 0
+
+    bins = [0, 1, 2, 3] # default
+    if interior_max > 0:
+        quantiles = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        calculated_bins = list(dist_values.quantile(quantiles))
+        calculated_bins[0] = interior_min
+        calculated_bins[-1] = interior_max
+        calculated_bins = sorted(list(set(calculated_bins)))
+        
+        if len(calculated_bins) < 4:
+            if interior_min == interior_max:
+                 calculated_bins = [interior_min, interior_min + 1, interior_min + 2, interior_min + 3]
+            else:
+                 calculated_bins = list(np.linspace(interior_min, interior_max, 4))
+        
+        bins = sorted(list(set(calculated_bins)))
+        while len(bins) < 4:
+             bins.append(bins[-1] + 1)
+             
+    return json.loads(gdf_jornada.to_json()), bins, df_interior
+
+#----------------------------------------------------#
 
 with tab2:
     st.markdown("## Jornada do Empreendedor")
     st.markdown("Acompanhamento das etapas de Pós-Qualificação: **Sensibilização**, **Trilha Empreendedora** e **Mentoria**.")
 
-    # 1. Carregar Dados de Jornada
+    # 1. Carregar Dados de Jornada (Cached)
     df_trilha, df_mentoria = load_jornada_data()
 
     if df_trilha.empty and df_mentoria.empty:
         st.info("Nenhum dado de Jornada disponível no momento.")
     else:
-        # --- Filtros (Aplicando o filtro global de Município se houver) ---
-        if selected_municipios:
-            # Filtrar Trilha
-            if "CIDADE" in df_trilha.columns:
-                 df_trilha = df_trilha[df_trilha["CIDADE"].isin(selected_municipios)]
-            
-            # Filtrar Mentoria
-            if "MUNICÍPIO" in df_mentoria.columns:
-                 df_mentoria = df_mentoria[df_mentoria["MUNICÍPIO"].isin(selected_municipios)]
-
-        # --- 2. Preparar Dados de Qualificação (O Nível 0 do Funil) ---
-        # df_filtrado já vem filtrado pela sidebar (Município, Executoras, Cursos, etc.)
-        # Vamos assumir que "Qualificados" são os Concluintes da etapa de Formação
-        df_qualificacao_agg = df_filtrado.groupby("Nome_Município")["CONCLUDENTES"].sum().reset_index()
-        df_qualificacao_agg.rename(columns={"Nome_Município": "NM_MUN", "CONCLUDENTES": "qtd_qualificacao"}, inplace=True)
+        # --- PROCESSAMENTO OTIMIZADO (CACHED) ---
+        # Chama a função que processa tudo de uma vez
+        with st.spinner("Processando indicadores da Jornada..."):
+            jornada_data = compute_jornada_metrics(
+                df_filtrado, 
+                df_trilha, 
+                df_mentoria, 
+                selected_municipios
+            )
         
-        # --- KPIs ---
-        # Trilha
-        # Tentativa de pegar coluna com til ou sem til
-        col_sensib = next((c for c in df_trilha.columns if "SENSIBILIZA" in c.upper()), None)
-        kpi_sensib = 0
-        if col_sensib:
-            # Garante conversão numérica antes de somar, pois o nome pode ter variado e escapado do load_jornada_data
-            kpi_sensib = pd.to_numeric(df_trilha[col_sensib], errors='coerce').fillna(0).sum()
+        # Desempacota resultados
+        kpis = jornada_data["kpis"] 
+        # (kpi_qualificados, kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados, taxa_conversao_global)
+        kpi_qualificados, kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados, taxa_conversao_global = kpis
         
-        kpi_inscritos = df_trilha["INSCRITOS TRILHA"].sum() if "INSCRITOS TRILHA" in df_trilha.columns else 0
-        kpi_concluintes_trilha = df_trilha["CONCLUDENTES TRILHA"].sum() if "CONCLUDENTES TRILHA" in df_trilha.columns else 0
-        
-        # Mentoria
-        kpi_mentorados = 0
-        if "STATUS" in df_mentoria.columns:
-             kpi_mentorados = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"].shape[0]
-             
-        # Qualificação (Base)
-        kpi_qualificados = df_qualificacao_agg["qtd_qualificacao"].sum()
+        df_comparativo = jornada_data["df_comparativo"]
+        funnel_data = jornada_data["funnel_data"]
+        df_long = jornada_data["df_long"]
 
-        # Taxa de Conversão Global (Qualificação -> Mentoria)
-        taxa_conversao_global = (kpi_mentorados / kpi_qualificados * 100) if kpi_qualificados > 0 else 0
-
-        # Exibir KPIs
+        # --- EXIBIÇÃO ---
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Qualificados (Fase 1)", f"{int(kpi_qualificados)}")
         col2.metric("Sensibilizados", f"{int(kpi_sensib)}")
         col3.metric("Inscritos Trilha", f"{int(kpi_inscritos)}")
         col4.metric("Concluintes Trilha", f"{int(kpi_concluintes_trilha)}")
         col5.metric("Mentorias Concluídas", f"{int(kpi_mentorados)}", delta=f"{taxa_conversao_global:.1f}% Conv.")
-        
         st.divider()
         
-        # --- Gráfico de Funil (Altair) ---
+        # --- Gráfico de Funil ---
         st.subheader("Funil de Conversão")
-        
-        # Dados do funil
-        funnel_data = pd.DataFrame({
-            "Etapa": ["Sensibilização", "Inscrição Trilha", "Conclusão Trilha", "Mentoria Concluída"],
-            "Quantidade": [kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados],
-            "Order": [1, 2, 3, 4] # Para garantir ordem
-        })
-        
-        # Altair Funnel (Barra Horizontal Ordenada)
         chart_funnel = alt.Chart(funnel_data).mark_bar().encode(
             x=alt.X('Quantidade:Q', title='Participantes'),
             y=alt.Y('Etapa:N', sort=alt.EncodingSortField(field="Order", order="ascending"), title=None),
@@ -1495,164 +1628,66 @@ with tab2:
             tooltip=['Etapa', 'Quantidade']
         ).properties(height=300)
         
-        text_funnel = chart_funnel.mark_text(
-            align='left',
-            baseline='middle',
-            dx=3  # Nudges text to right so it doesn't overlap the bar
-        ).encode(
-            text='Quantidade:Q'
-        )
-        
+        text_funnel = chart_funnel.mark_text(align='left', baseline='middle', dx=3).encode(text='Quantidade:Q')
         st.altair_chart(chart_funnel + text_funnel, use_container_width=True)
-        
         st.divider()
         
-        # --- Gráfico Eficiência (Altair) ---
-        c_graf1, c_graf2 = st.columns(2) # Layout reorganizado? O user pediu 'charts use same lib'. Vamos manter layout, mudar lib.
-        
-        # Mas espere, o layout anterior colocava Funil na Esquerda e Eficiencia na Direita. 
-        # O código acima botou Funil sozinho em cima. Vamos ajustar para seguir o pedido "passo a passo" mas com bom senso.
-        # Vou manter a estrutura nova (Funil em cima, Eficiência embaixo ou lado a lado?)
-        # O código anterior tinha Funil (c_graf1) e Eficiencia (c_graf2).
-        # Vamos refazer essa estrutura.
-        
-        # ... (Recalculando layout para ser igual ao anterior) ...
-        # Ah, no step anterior converti para Funil Absoluto e Eficiencia lado a lado.
-        # Vou manter isso.
-        
-        # --- Gráfico Comparativo (Altair) ---
-        # Cruzamento de dados para o gráfico (Top 10)
-        # ... (Código de agregação mantido, apenas visualização muda) ...
-        
-        # Agregação Trilha
-        if "CIDADE" in df_trilha.columns:
-            agg_trilha = df_trilha.groupby("CIDADE")["CONCLUDENTES TRILHA"].sum().reset_index()
-            agg_trilha.rename(columns={"CIDADE": "NM_MUN", "CONCLUDENTES TRILHA": "qtd_trilha"}, inplace=True)
-        else:
-            agg_trilha = pd.DataFrame(columns=["NM_MUN", "qtd_trilha"])
-            
-        # Agregação Mentoria
-        if "MUNICÍPIO" in df_mentoria.columns:
-            df_mentoria_concluidos = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"]
-            agg_mentoria = df_mentoria_concluidos.groupby("MUNICÍPIO").size().reset_index(name="qtd_mentoria")
-            agg_mentoria.rename(columns={"MUNICÍPIO": "NM_MUN"}, inplace=True)
-        else:
-            agg_mentoria = pd.DataFrame(columns=["NM_MUN", "qtd_mentoria"])
-
-        # Merge Tudo
-        df_qualificacao_agg["NM_MUN_UPPER"] = df_qualificacao_agg["NM_MUN"].astype(str).str.upper().str.strip()
-        agg_trilha["NM_MUN_UPPER"] = agg_trilha["NM_MUN"].astype(str).str.upper().str.strip()
-        agg_mentoria["NM_MUN_UPPER"] = agg_mentoria["NM_MUN"].astype(str).str.upper().str.strip()
-        
-        df_comparativo = df_qualificacao_agg.merge(agg_trilha[["NM_MUN_UPPER", "qtd_trilha"]], on="NM_MUN_UPPER", how="left")
-        df_comparativo = df_comparativo.merge(agg_mentoria[["NM_MUN_UPPER", "qtd_mentoria"]], on="NM_MUN_UPPER", how="left").fillna(0)
-        df_comparativo["total_empreend"] = df_comparativo["qtd_trilha"] + df_comparativo["qtd_mentoria"]
-        
-        # Top 10 por Qualificados
-        df_top = df_comparativo.sort_values("qtd_qualificacao", ascending=False).head(10)
-        
-        # Transformar para Long Format
-        df_long = df_top.melt(id_vars=["NM_MUN"], value_vars=["qtd_qualificacao", "qtd_mentoria"], 
-                              var_name="Tipo", value_name="Quantidade")
-        df_long["Tipo"] = df_long["Tipo"].map({"qtd_qualificacao": "Qualificados", "qtd_mentoria": "Mentorados"})
-        
+        # --- Gráfico Eficiência (Top 10) ---
         st.subheader("Eficiência por Município (Top 10)")
-        
         chart_bars = alt.Chart(df_long).mark_bar().encode(
-            x=alt.X('NM_MUN:N', sort='-y', title=None), # Sort by value descending? No, sort by NM_MUN based on Qtd Qualificação.
+            x=alt.X('NM_MUN:N', sort='-y', title=None), 
             y=alt.Y('Quantidade:Q', title='Alunos'),
             color=alt.Color('Tipo:N', scale=alt.Scale(domain=['Qualificados', 'Mentorados'], range=['#6c91c8', '#ffaa00'])),
-            xOffset='Tipo:N', # Grouped bars
+            xOffset='Tipo:N',
             tooltip=['NM_MUN', 'Tipo', 'Quantidade']
         ).properties(height=400)
-        
         st.altair_chart(chart_bars, use_container_width=True)
-
         st.divider()
-        
-        # --- Mapa de Densidade Empreendedora (Melhorado com Bins) ---
+
+        # --- Mapa (Processamento Cached) ---
         st.subheader("Distribuição Geográfica (Empreendedorismo)")
         
-        gdf_base = get_base_geodataframe(municipios_com_qualificacao) 
-        gdf_base["NM_MUN_UPPER"] = gdf_base["NM_MUN"].astype(str).str.upper().str.strip()
+        # Chama preparação do mapa cacheada
+        geojson_jornada, bins_jornada, df_interior_plot = prepare_jornada_map_data(
+            df_comparativo, 
+            municipios_com_qualificacao
+        )
         
-        cols_drop_gdf = ["total_turmas", "total_concludentes", "qtd_trilha", "qtd_mentoria", "total_empreend"]
-        gdf_base_clean = gdf_base.drop(columns=[c for c in cols_drop_gdf if c in gdf_base.columns], errors='ignore')
-        
-        df_comp_clean = df_comparativo.drop(columns=["NM_MUN"], errors='ignore')
-        gdf_jornada = gdf_base_clean.merge(df_comp_clean, on="NM_MUN_UPPER", how="left").fillna(0)
-        
-        m_jornada = folium.Map(location=[-5.3159, -39.2129], zoom_start=7)
-        
-        # Solução para Fortaleza/Outlier: Remover Fortaleza da Visualização do Mapa
-        # O usuário pediu explicitamente para considerar apenas o interior no mapa
-        df_interior = df_comparativo[df_comparativo["NM_MUN_UPPER"] != "FORTALEZA"]
-        data_to_plot = df_interior
-        
-        dist_values = data_to_plot["qtd_mentoria"]
-        
-        # Calcular min/max do universo plotado (Interior)
-        interior_max = dist_values.max() if not dist_values.empty else 0
-        interior_min = dist_values.min() if not dist_values.empty else 0
+        # Fragmento do Mapa para evitar Reruns Globais
+        @st.fragment
+        def render_mapa_jornada(geojson, data_plot, bins):
+            m_jornada = folium.Map(location=[-5.3159, -39.2129], zoom_start=7)
+            
+            folium.Choropleth(
+                geo_data=geojson,
+                data=data_plot,
+                columns=["NM_MUN_UPPER", "qtd_mentoria"],
+                key_on="feature.properties.NM_MUN_UPPER",
+                fill_color="YlOrRd", 
+                fill_opacity=0.7,
+                line_opacity=0.2,
+                legend_name="Total Mentorias (Interior)",
+                threshold_scale=bins,
+                highlight=True
+            ).add_to(m_jornada)
+            
+            folium.GeoJson(
+                geojson,
+                style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'},
+                tooltip=folium.GeoJsonTooltip(
+                    fields=["NM_MUN", "qtd_qualificacao", "qtd_trilha", "qtd_mentoria"],
+                    aliases=["Município:", "Qualificados:", "Trilha:", "Mentorados:"],
+                    localize=True
+                )
+            ).add_to(m_jornada)
+            
+            st_folium(m_jornada, width=700, height=500, key="mapa_jornada_frag")
 
-        if interior_max > 0:
-            # Cria quantiles baseados apenas no interior
-            quantiles = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
-            bins = list(dist_values.quantile(quantiles))
-            
-            # Ajusta limites
-            bins[0] = interior_min
-            bins[-1] = interior_max
-            
-            # Garante unicidade e ordem
-            bins = sorted(list(set(bins)))
-            
-            # Validação ColorBrewer (mínimo 4 edges / 3 cores)
-            if len(bins) < 4:
-                min_val = interior_min
-                max_val = interior_max
-                
-                if min_val == max_val:
-                     bins = [min_val, min_val + 1, min_val + 2, min_val + 3]
-                else:
-                     bins = list(np.linspace(min_val, max_val, 4))
-            
-            bins = sorted(list(set(bins)))
-            while len(bins) < 4:
-                 bins.append(bins[-1] + 1)
-                 
-        else:
-            bins = [0, 1, 2, 3]
+        # Chama o fragmento
+        render_mapa_jornada(geojson_jornada, df_interior_plot, bins_jornada)
         
-        folium.Choropleth(
-            geo_data=json.loads(gdf_jornada.to_json()),
-            data=data_to_plot,
-            columns=["NM_MUN_UPPER", "qtd_mentoria"],
-            key_on="feature.properties.NM_MUN_UPPER",
-            fill_color="YlOrRd", 
-            fill_opacity=0.7,
-            line_opacity=0.2,
-            legend_name="Total Mentorias (Interior)",
-            threshold_scale=bins,
-            highlight=True
-        ).add_to(m_jornada)
-        
-        folium.GeoJson(
-            json.loads(gdf_jornada.to_json()),
-            style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'},
-            tooltip=folium.GeoJsonTooltip(
-                fields=["NM_MUN", "qtd_qualificacao", "qtd_trilha", "qtd_mentoria"],
-                aliases=["Município:", "Qualificados:", "Trilha:", "Mentorados:"],
-                localize=True
-            )
-        ).add_to(m_jornada)
-        
-        st_folium(m_jornada, width=700, height=500, key="mapa_jornada")
-        
-        # --- Tabela Analítica ---
+        # --- Tabela ---
         st.subheader("Tabela de Efetividade")
-        
-        # Calcular % Conversão
         df_comparativo["conv_rate"] = (df_comparativo["qtd_mentoria"] / df_comparativo["qtd_qualificacao"] * 100).fillna(0)
         
         st.dataframe(
@@ -1671,8 +1706,7 @@ with tab2:
                 "Taxa de Conversão (%)": st.column_config.ProgressColumn(
                     "Conversão (Qualif. -> Mentoria)",
                     format="%.1f%%",
-                    min_value=0,
-                    max_value=100
+                    min_value=0, max_value=100
                 )
             }
         )
