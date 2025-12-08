@@ -1614,12 +1614,23 @@ def prepare_jornada_map_data(df_comparativo, _municipios_geojson_data):
     cols_drop_gdf = ["total_turmas", "total_concludentes", "qtd_trilha", "qtd_mentoria", "total_empreend"]
     gdf_base_clean = gdf_base.drop(columns=[c for c in cols_drop_gdf if c in gdf_base.columns], errors='ignore')
     
+    
     # Merge com dados comparativos
     df_comp_clean = df_comparativo.drop(columns=["NM_MUN"], errors='ignore')
     gdf_jornada = gdf_base_clean.merge(df_comp_clean, on="NM_MUN_UPPER", how="left").fillna(0)
     
-    # Dados de Plotagem (Interior apenas)
-    df_interior = df_comparativo[df_comparativo["NM_MUN_UPPER"] != "FORTALEZA"]
+    # FILTRO: Remover Fortaleza e Municípios com Mentoria zerada do GeoJSON de plotagem
+    gdf_jornada = gdf_jornada[
+        (gdf_jornada["NM_MUN_UPPER"] != "FORTALEZA") & 
+        (gdf_jornada["qtd_mentoria"] > 0)
+    ]
+    
+    # Dados de Plotagem (Interior apenas e com Mentoria > 0)
+    df_interior = df_comparativo[
+        (df_comparativo["NM_MUN_UPPER"] != "FORTALEZA") &
+        (df_comparativo["qtd_mentoria"] > 0)
+    ]
+    
     
     # Bins Dinâmicos
     dist_values = df_interior["qtd_mentoria"]
