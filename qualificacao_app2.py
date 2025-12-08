@@ -1422,14 +1422,13 @@ with tab2:
     st.markdown("## Jornada do Empreendedor")
     st.markdown("Acompanhamento das etapas de Pós-Qualificação: **Sensibilização**, **Trilha Empreendedora** e **Mentoria**.")
 
-    # 1. Carregar Dados
+    # 1. Carregar Dados de Jornada
     df_trilha, df_mentoria = load_jornada_data()
 
     if df_trilha.empty and df_mentoria.empty:
         st.info("Nenhum dado de Jornada disponível no momento.")
     else:
         # --- Filtros (Aplicando o filtro global de Município se houver) ---
-        # Normalização básica para garantir o match
         if selected_municipios:
             # Filtrar Trilha
             if "CIDADE" in df_trilha.columns:
@@ -1439,124 +1438,176 @@ with tab2:
             if "MUNICÍPIO" in df_mentoria.columns:
                  df_mentoria = df_mentoria[df_mentoria["MUNICÍPIO"].isin(selected_municipios)]
 
+        # --- 2. Preparar Dados de Qualificação (O Nível 0 do Funil) ---
+        # df_filtrado já vem filtrado pela sidebar (Município, Executoras, Cursos, etc.)
+        # Vamos assumir que "Qualificados" são os Concluintes da etapa de Formação
+        df_qualificacao_agg = df_filtrado.groupby("Nome_Município")["CONCLUDENTES"].sum().reset_index()
+        df_qualificacao_agg.rename(columns={"Nome_Município": "NM_MUN", "CONCLUDENTES": "qtd_qualificacao"}, inplace=True)
+        
         # --- KPIs ---
         # Trilha
-        kpi_sensib = df_trilha["PESSOAS SENSIBILIZAÇÃO"].sum() if "PESSOAS SENSIBILIZAÇÃO" in df_trilha.columns else 0
+        # Tentativa de pegar coluna com til ou sem til
+        col_sensib = next((c for c in df_trilha.columns if "SENSIBILIZA" in c.upper()), None)
+        kpi_sensib = 0
+        if col_sensib:
+            # Garante conversão numérica antes de somar, pois o nome pode ter variado e escapado do load_jornada_data
+            kpi_sensib = pd.to_numeric(df_trilha[col_sensib], errors='coerce').fillna(0).sum()
+        
         kpi_inscritos = df_trilha["INSCRITOS TRILHA"].sum() if "INSCRITOS TRILHA" in df_trilha.columns else 0
         kpi_concluintes_trilha = df_trilha["CONCLUDENTES TRILHA"].sum() if "CONCLUDENTES TRILHA" in df_trilha.columns else 0
         
-        # Mentoria (Contagem de linhas com Status 'Concluído')
+        # Mentoria
         kpi_mentorados = 0
         if "STATUS" in df_mentoria.columns:
-             # Normaliza status para comparação
              kpi_mentorados = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"].shape[0]
+             
+        # Qualificação (Base)
+        kpi_qualificados = df_qualificacao_agg["qtd_qualificacao"].sum()
+
+        # Taxa de Conversão Global (Qualificação -> Mentoria)
+        taxa_conversao_global = (kpi_mentorados / kpi_qualificados * 100) if kpi_qualificados > 0 else 0
 
         # Exibir KPIs
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Sensibilizados", f"{int(kpi_sensib)}")
-        col2.metric("Inscritos na Trilha", f"{int(kpi_inscritos)}")
-        col3.metric("Concluintes Trilha", f"{int(kpi_concluintes_trilha)}")
-        col4.metric("Mentorias Concluídas", f"{int(kpi_mentorados)}")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Qualificados (Fase 1)", f"{int(kpi_qualificados)}")
+        col2.metric("Sensibilizados", f"{int(kpi_sensib)}")
+        col3.metric("Inscritos Trilha", f"{int(kpi_inscritos)}")
+        col4.metric("Concluintes Trilha", f"{int(kpi_concluintes_trilha)}")
+        col5.metric("Mentorias Concluídas", f"{int(kpi_mentorados)}", delta=f"{taxa_conversao_global:.1f}% Conv.")
         
         st.divider()
         
-        # --- Gráfico de Funil ---
-        st.subheader("Funil de Conversão")
+        # --- Gráfico Comparativo e Funil ---
+        c_graf1, c_graf2 = st.columns(2)
         
-        # Dados do funil
-        funnel_data = pd.DataFrame({
-            "Etapa": ["Sensibilização", "Inscrição Trilha", "Conclusão Trilha", "Mentoria Concluída"],
-            "Quantidade": [kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados]
-        })
-        
-        # Criação do gráfico
-        fig_funnel = px.funnel(funnel_data, x='Quantidade', y='Etapa', color='Etapa',
-                               color_discrete_sequence=px.colors.qualitative.Pastel)
-        fig_funnel.update_layout(showlegend=False)
-        st.plotly_chart(fig_funnel, use_container_width=True)
-        
+        with c_graf1:
+            st.subheader("Funil de Conversão Absoluto")
+            funnel_data = pd.DataFrame({
+                "Etapa": ["Qualificação", "Sensibilização", "Inscrição Trilha", "Conclusão Trilha", "Mentoria"],
+                "Quantidade": [kpi_qualificados, kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados]
+            })
+            fig_funnel = px.funnel(funnel_data, x='Quantidade', y='Etapa', color='Etapa',
+                                   color_discrete_sequence=px.colors.qualitative.Safe)
+            fig_funnel.update_layout(showlegend=False, margin=dict(l=0, r=0, t=30, b=0))
+            st.plotly_chart(fig_funnel, use_container_width=True)
+            
+        with c_graf2:
+            st.subheader("Eficiência por Município (Top 10)")
+            # Cruzamento de dados para o gráfico
+            
+            # Agregação Trilha
+            if "CIDADE" in df_trilha.columns:
+                agg_trilha = df_trilha.groupby("CIDADE")["CONCLUDENTES TRILHA"].sum().reset_index()
+                agg_trilha.rename(columns={"CIDADE": "NM_MUN", "CONCLUDENTES TRILHA": "qtd_trilha"}, inplace=True)
+            else:
+                agg_trilha = pd.DataFrame(columns=["NM_MUN", "qtd_trilha"])
+                
+            # Agregação Mentoria
+            if "MUNICÍPIO" in df_mentoria.columns:
+                df_mentoria_concluidos = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"]
+                agg_mentoria = df_mentoria_concluidos.groupby("MUNICÍPIO").size().reset_index(name="qtd_mentoria")
+                agg_mentoria.rename(columns={"MUNICÍPIO": "NM_MUN"}, inplace=True)
+            else:
+                agg_mentoria = pd.DataFrame(columns=["NM_MUN", "qtd_mentoria"])
+
+            # Merge Tudo
+            # Normalizar nomes para merge
+            df_qualificacao_agg["NM_MUN_UPPER"] = df_qualificacao_agg["NM_MUN"].astype(str).str.upper().str.strip()
+            agg_trilha["NM_MUN_UPPER"] = agg_trilha["NM_MUN"].astype(str).str.upper().str.strip()
+            agg_mentoria["NM_MUN_UPPER"] = agg_mentoria["NM_MUN"].astype(str).str.upper().str.strip()
+            
+            # Base com todos os municípios qualificados
+            df_comparativo = df_qualificacao_agg.merge(agg_trilha[["NM_MUN_UPPER", "qtd_trilha"]], on="NM_MUN_UPPER", how="left")
+            df_comparativo = df_comparativo.merge(agg_mentoria[["NM_MUN_UPPER", "qtd_mentoria"]], on="NM_MUN_UPPER", how="left").fillna(0)
+            
+            df_comparativo["total_empreend"] = df_comparativo["qtd_trilha"] + df_comparativo["qtd_mentoria"]
+            
+            # Ordenar por Qualificados para ver quem tem muito aluno e pouco empreendedor
+            df_top = df_comparativo.sort_values("qtd_qualificacao", ascending=False).head(10)
+            
+            # Transformar para long format para o Plotly Grouped Bar
+            df_long = df_top.melt(id_vars=["NM_MUN"], value_vars=["qtd_qualificacao", "qtd_mentoria"], 
+                                  var_name="Tipo", value_name="Quantidade")
+            
+            # Renomear para ficar bonito na legenda
+            df_long["Tipo"] = df_long["Tipo"].map({"qtd_qualificacao": "Qualificados", "qtd_mentoria": "Mentorados"})
+            
+            fig_bar = px.bar(df_long, x="NM_MUN", y="Quantidade", color="Tipo", barmode="group",
+                             color_discrete_map={"Qualificados": "#6c91c8", "Mentorados": "#ffaa00"})
+            fig_bar.update_layout(xaxis_title=None, legend_title=None, margin=dict(l=0, r=0, t=30, b=0))
+            st.plotly_chart(fig_bar, use_container_width=True)
+
         st.divider()
         
         # --- Mapa de Densidade Empreendedora ---
-        st.subheader("Distribuição Geográfica")
-        
-        # Agregação por Município
-        # Trilha
-        if "CIDADE" in df_trilha.columns:
-            agg_trilha = df_trilha.groupby("CIDADE")["CONCLUDENTES TRILHA"].sum().reset_index()
-            agg_trilha.rename(columns={"CIDADE": "NM_MUN", "CONCLUDENTES TRILHA": "qtd_trilha"}, inplace=True)
-        else:
-            agg_trilha = pd.DataFrame(columns=["NM_MUN", "qtd_trilha"])
-            
-        # Mentoria
-        if "MUNICÍPIO" in df_mentoria.columns:
-            df_mentoria_concluidos = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"]
-            agg_mentoria = df_mentoria_concluidos.groupby("MUNICÍPIO").size().reset_index(name="qtd_mentoria")
-            agg_mentoria.rename(columns={"MUNICÍPIO": "NM_MUN"}, inplace=True)
-        else:
-             agg_mentoria = pd.DataFrame(columns=["NM_MUN", "qtd_mentoria"])
-             
-        # Merge
-        df_mapa = pd.merge(agg_trilha, agg_mentoria, on="NM_MUN", how="outer").fillna(0)
-        df_mapa["total_empreend"] = df_mapa["qtd_trilha"] + df_mapa["qtd_mentoria"]
+        st.subheader("Distribuição Geográfica (Empreendedorismo)")
         
         # Preparar GeoJSON (Merge com Geometrias)
-        gdf_base = get_base_geodataframe(municipios_com_qualificacao) # Access cached function
-        
-        # Normalização de nomes para o merge no mapa
-        df_mapa["NM_MUN_UPPER"] = df_mapa["NM_MUN"].astype(str).str.upper().str.strip()
+        gdf_base = get_base_geodataframe(municipios_com_qualificacao) 
         gdf_base["NM_MUN_UPPER"] = gdf_base["NM_MUN"].astype(str).str.upper().str.strip()
         
-        # Merge Geometry
-        # Remover colunas conflitantes do gdf_base se houver
+        # Remover colunas conflitantes
         cols_drop_gdf = ["total_turmas", "total_concludentes", "qtd_trilha", "qtd_mentoria", "total_empreend"]
         gdf_base_clean = gdf_base.drop(columns=[c for c in cols_drop_gdf if c in gdf_base.columns], errors='ignore')
         
-        # Drop NM_MUN from right side (df_mapa) to avoid suffixes (_x, _y) on the preserved NM_MUN from gdf_base
-        df_mapa_clean = df_mapa.drop(columns=["NM_MUN"])
+        # Merge - Usando df_comparativo que já tem tudo unificado
+        # Remover NM_MUN do df_comparativo para evitar colisão, manter o NM_MUN do gdf
+        df_comp_clean = df_comparativo.drop(columns=["NM_MUN"], errors='ignore')
         
-        gdf_jornada = gdf_base_clean.merge(df_mapa_clean, on="NM_MUN_UPPER", how="left").fillna(0)
+        gdf_jornada = gdf_base_clean.merge(df_comp_clean, on="NM_MUN_UPPER", how="left").fillna(0)
         
-        # Renderizar Mapa com Folium
         m_jornada = folium.Map(location=[-5.3159, -39.2129], zoom_start=7)
         
-        # Choropleth
-        chlor = folium.Choropleth(
+        # Choropleth baseada na QUANTIDADE DE MENTORIAS (Resultado final do funil)
+        folium.Choropleth(
             geo_data=json.loads(gdf_jornada.to_json()),
-            data=df_mapa,
-            columns=["NM_MUN_UPPER", "total_empreend"],
+            data=df_comparativo,
+            columns=["NM_MUN_UPPER", "qtd_mentoria"],
             key_on="feature.properties.NM_MUN_UPPER",
-            fill_color="YlOrRd",
+            fill_color="YlOrRd", # Cor diferente para diferenciar do mapa azul de cursos
             fill_opacity=0.7,
             line_opacity=0.2,
-            legend_name="Total Concluintes (Trilha + Mentoria)",
+            legend_name="Total Mentorias Concluídas",
             highlight=True
         ).add_to(m_jornada)
         
-        # Tooltip
+        # Tooltip com dados comparativos
         folium.GeoJson(
             json.loads(gdf_jornada.to_json()),
-            style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'}, # Invisível, só para tooltip
+            style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'},
             tooltip=folium.GeoJsonTooltip(
-                fields=["NM_MUN", "qtd_trilha", "qtd_mentoria", "total_empreend"],
-                aliases=["Município:", "Trilha:", "Mentoria:", "Total:"],
+                fields=["NM_MUN", "qtd_qualificacao", "qtd_trilha", "qtd_mentoria"],
+                aliases=["Município:", "Qualificados:", "Trilha:", "Mentorados:"],
                 localize=True
             )
         ).add_to(m_jornada)
         
         st_folium(m_jornada, width=700, height=500, key="mapa_jornada")
         
-        # --- Tabela Resumo ---
-        st.subheader("Resumo por Município")
+        # --- Tabela Analítica ---
+        st.subheader("Tabela de Efetividade")
+        
+        # Calcular % Conversão
+        df_comparativo["conv_rate"] = (df_comparativo["qtd_mentoria"] / df_comparativo["qtd_qualificacao"] * 100).fillna(0)
+        
         st.dataframe(
-            df_mapa[["NM_MUN", "qtd_trilha", "qtd_mentoria", "total_empreend"]]
-            .sort_values("total_empreend", ascending=False)
+            df_comparativo[["NM_MUN", "qtd_qualificacao", "qtd_trilha", "qtd_mentoria", "conv_rate"]]
+            .sort_values("qtd_qualificacao", ascending=False)
             .rename(columns={
-                "NM_MUN": "Município", 
-                "qtd_trilha": "Concluintes Trilha", 
-                "qtd_mentoria": "Mentorias Concluídas", 
-                "total_empreend": "Total Geral"
+                "NM_MUN": "Município",
+                "qtd_qualificacao": "Total Qualificados",
+                "qtd_trilha": "Concluintes Trilha",
+                "qtd_mentoria": "Mentorias Concluídas",
+                "conv_rate": "Taxa de Conversão (%)"
             }),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "Taxa de Conversão (%)": st.column_config.ProgressColumn(
+                    "Conversão (Qualif. -> Mentoria)",
+                    format="%.1f%%",
+                    min_value=0,
+                    max_value=100
+                )
+            }
         )
