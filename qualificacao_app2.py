@@ -12,8 +12,9 @@ from folium.plugins import Draw
 import base64
 
 from branca.colormap import linear
-from branca.element import MacroElement, Template
+from branca.element import MacroElement, Template, IFrame
 import plotly.express as px
+import urllib.parse as up # Import necessario para urlencode
 
 # Configuração para evitar FutureWarnings do Pandas (Downcasting)
 pd.set_option('future.no_silent_downcasting', True)
@@ -787,6 +788,60 @@ with tab1:
         # Chamada do fragmento (somente ele reroda nos cliques do mapa)
         # @st.fragment
         # Inserir o fragmento do mapa
+
+        # 🔹 Chave da API do Google Maps (Fornecida pelo usuário)
+        API_KEY = "AIzaSyCzCCCEss2JnTKtBsGWwpvCJMFg19svQpU"
+
+        # 🔹 Função para gerar a URL da imagem do Street View
+        def streetview_url(lat, lon, width=400, height=250, fov=85, heading=90, pitch=0):
+            params = {
+                "size": f"{width}x{height}",
+                "location": f"{lat},{lon}",
+                "fov": str(fov),
+                "pitch": str(pitch),
+                "heading": str(heading),
+                "key": API_KEY
+            }
+            return f"https://maps.googleapis.com/maps/api/streetview?{up.urlencode(params)}"
+
+        def make_kitchen_popup(props, lat, lon):
+            nome_coz = props.get('NOME_USP1', 'Sem Nome')
+            ender    = f"{props.get('ENDERECO5', '')}, {props.get('NUMERO6', '')}"
+            bairro   = props.get('BAIRRO_L7', '')
+            lote     = props.get('LOTE4', '')
+            
+            # URL da Imagem Estática (Street View)
+            sv_img_url = streetview_url(lat, lon, width=360, height=200)
+            
+            # Links Externos
+            rotas_car   = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}&travelmode=driving"
+            rotas_ape   = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}&travelmode=walking"
+            sv_link     = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
+
+            html = f'''
+            <div style="font-family: 'Space Grotesk', sans-serif; font-size:13px; width:360px; color:#333;">
+              <div style="margin-bottom:8px; border-radius:8px; overflow:hidden; border: 1px solid #ddd;">
+                <img src="{sv_img_url}" alt="Street View" style="width:100%; display:block;">
+              </div>
+              
+              <div style="font-weight:700; font-size:15px; margin-bottom:4px; color: #2D68C4;">{nome_coz}</div>
+
+              <div style="margin-bottom:4px;"><b>Endereço:</b> {ender}</div>
+              <div style="margin-bottom:4px;"><b>Bairro:</b> {bairro}</div>
+              <div style="margin-bottom:8px;">
+                  <b>Lote:</b> <span style="background:#EBF3FA; border:1px solid #D6DDF1; padding:2px 8px; border-radius:12px; color: #2D68C4; font-size: 11px;">{lote}</span>
+              </div>
+
+              <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; border-top: 1px solid #eee; padding-top: 8px;">
+                <a href="{rotas_car}" target="_blank" style="text-decoration:none; color:#2D68C4; font-weight:600; font-size: 12px;">🚗 Carro</a>
+                <a href="{rotas_ape}" target="_blank" style="text-decoration:none; color:#2D68C4; font-weight:600; font-size: 12px;">🚶 A pé</a>
+                <a href="{sv_link}" target="_blank" style="text-decoration:none; color:#444; font-weight:600; font-size: 12px;">📷 Street View</a>
+              </div>
+            </div>
+            '''
+            
+            return folium.Popup(IFrame(html=html, width=380, height=380), max_width=380)
+
         @st.fragment
         def mapa_fragment(
             municipios_geojson,
@@ -896,16 +951,28 @@ with tab1:
             
     
             cozinhas_csf_feature_group = folium.FeatureGroup(name="Cozinhas CSF", show=False).add_to(m)
-            folium.GeoJson(
-                geojson_cozinhas_csf_filtrado,
-                name="Cozinhas CSF",
-                marker=folium.Marker(icon=cozinha_csf_icon),
-                # tooltip=folium.GeoJsonTooltip(
-                #     fields=["NOME_USP1", "ID0", "LOTE4"],
-                #     aliases=["Nome da Cozinha: ", "ID da Cozinha: ", "Lote: "],
-                #     localize=True,
-                # ),
-            ).add_to(cozinhas_csf_feature_group)
+            
+            # Loop para criar Markers com Popups Customizados (Street View)
+            if geojson_cozinhas_csf_filtrado:
+                for feature in geojson_cozinhas_csf_filtrado["features"]:
+                    props = feature["properties"]
+                    geom = feature["geometry"]
+                    
+                    if geom["type"] == "Point":
+                        lon, lat = geom["coordinates"] # GeoJSON é (Lon, Lat)
+                        
+                        # Cria ícone individual para evitar conflitos de referência
+                        icon_obj = folium.CustomIcon(
+                            icon_image="icons/icone_csf_1.png",
+                            icon_size=(35, 42),
+                        )
+                        
+                        folium.Marker(
+                            location=[lat, lon],
+                            icon=icon_obj,
+                            popup=make_kitchen_popup(props, lat, lon),
+                            tooltip=f"{props.get('NOME_USP1', 'Cozinha')}"
+                        ).add_to(cozinhas_csf_feature_group)
     
             cozinhas_focais_feature_group = folium.FeatureGroup(name="Cozinhas Focais", show=False).add_to(m)
             folium.GeoJson(
@@ -1681,7 +1748,7 @@ with tab2:
                 )
             ).add_to(m_jornada)
             
-            st_folium(m_jornada, width=700, height=500, key="mapa_jornada_frag")
+            st_folium(m_jornada, width=700, height=500, key="mapa_jornada_frag", returned_objects=["last_object_clicked"])
 
         # Chama o fragmento
         render_mapa_jornada(geojson_jornada, df_interior_plot, bins_jornada)
