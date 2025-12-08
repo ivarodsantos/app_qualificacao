@@ -13,6 +13,39 @@ import base64
 
 from branca.colormap import linear
 from branca.element import MacroElement, Template
+import plotly.express as px
+
+@st.cache_data
+def load_jornada_data():
+    # Load Trilha
+    try:
+        trilha_df = pd.read_csv("data2/compilado_trilha_sebrae.csv", header=0)
+        # Drop PII (Personal Identifiable Information)
+        cols_drop = ["ALUNO", "CONTATO", "PONTO FOCAL", "ENDEREÇO", "CPF", "TELEFONE"]
+        trilha_df = trilha_df[[c for c in trilha_df.columns if not any(x in c.upper() for x in cols_drop)]]
+        
+        # Numeric conversion
+        cols_num = ["INSCRITOS TRILHA", "CONCLUDENTES TRILHA", "PESSOAS SENSIBILIZAÇÃO"]
+        for col in cols_num:
+            if col in trilha_df.columns:
+                trilha_df[col] = pd.to_numeric(trilha_df[col], errors='coerce').fillna(0)
+    except Exception as e:
+        trilha_df = pd.DataFrame()
+        st.error(f"Erro ao carregar Trilha: {e}")
+
+    # Load Mentoria
+    try:
+        mentoria_df = pd.read_csv("data2/compilado_mentoria_sebrae.csv", header=0)
+        # Drop PII
+        cols_drop = ["ALUNO", "CONTATO", "PONTO FOCAL", "ENDEREÇO", "CPF", "TELEFONE"]
+        mentoria_df = mentoria_df[[c for c in mentoria_df.columns if not any(x in c.upper() for x in cols_drop)]]
+        
+        # For Mentoria, usually 1 row = 1 student. So we count rows with Status = Concluido
+    except Exception as e:
+        mentoria_df = pd.DataFrame()
+        st.error(f"Erro ao carregar Mentoria: {e}")
+        
+    return trilha_df, mentoria_df
 from merge_id_plataforma import merge_id_plataforma
 import acesso_planilha
 from acesso_planilha import carregar_google_sheet_aba
@@ -491,892 +524,1039 @@ else:
 
     
     
-# (Bloco de conversão redundante removido pois já foi tratado acima)
 
+tab1, tab2 = st.tabs(['Qualificação Profissional', 'Jornada Empreendedora'])
+
+with tab1:
+    # (Bloco de conversão redundante removido pois já foi tratado acima)
+    
+        
+        
+    #-------------- Criar métricas a partir dos municípios --------------#
+    df_metrics = df_filtrado.groupby(
+        ["Código Município Completo", "Nome_Município", 'Nº LOTE 2025']
+    ).agg(
+        total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"),
+        total_vagas_ofertadas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
+        total_inscritos=pd.NamedAgg(column="INSCRITOS", aggfunc="sum"),
+        total_desistentes=pd.NamedAgg(column="DESISTENTES", aggfunc="sum"),
+        total_concludentes=pd.NamedAgg(column="CONCLUDENTES", aggfunc="sum"),
+        percentual_conclusao=pd.NamedAgg(
+            column="CONCLUDENTES",
+            aggfunc=lambda x: round(
+                (x.sum() / df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum()) * 100, 2
+            ) if df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum() > 0 else 0
+        ),
+    ).reset_index()
     
     
-#-------------- Criar métricas a partir dos municípios --------------#
-df_metrics = df_filtrado.groupby(
-    ["Código Município Completo", "Nome_Município", 'Nº LOTE 2025']
-).agg(
-    total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"),
-    total_vagas_ofertadas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
-    total_inscritos=pd.NamedAgg(column="INSCRITOS", aggfunc="sum"),
-    total_desistentes=pd.NamedAgg(column="DESISTENTES", aggfunc="sum"),
-    total_concludentes=pd.NamedAgg(column="CONCLUDENTES", aggfunc="sum"),
-    percentual_conclusao=pd.NamedAgg(
-        column="CONCLUDENTES",
-        aggfunc=lambda x: round(
-            (x.sum() / df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum()) * 100, 2
-        ) if df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum() > 0 else 0
-    ),
-).reset_index()
-
-
-# Cálculo direto do df_filtrado para evitar perda de dados por NaN no groupby
-total_geral_turmas = df_filtrado.shape[0] # Considera cada linha uma turma
-total_geral_vagas = df_filtrado["VAGAS OFERTADAS"].sum()
-total_geral_inscritos = df_filtrado["INSCRITOS"].sum()
-total_geral_desistentes = df_filtrado["DESISTENTES"].sum()
-total_geral_concludentes = df_filtrado["CONCLUDENTES"].sum()
-
-# Cálculo direto (sem limitação, conforme solicitado pelo usuário)
-concludentes_ajustados = total_geral_concludentes
-
-percentual_geral_conclusao = round(
-    (concludentes_ajustados / total_geral_vagas) * 100, 2
-) if total_geral_vagas > 0 else 0
-
-# Métricas de Status
-# Robustez para encoding: verificar startsWith ou contains se necessário, 
-# mas assumindo utf-8 correto:
-turmas_em_execucao = df_filtrado[
-    df_filtrado["STATUS"].astype(str).str.strip() == "Em execução"
-].shape[0]
-
-turmas_concluidas = df_filtrado[
-    df_filtrado["STATUS"].astype(str).str.strip() == "Concluído"
-].shape[0]
-
-
-df_filtrado.rename(
-    columns={"ÁREA DO CURSO\n(automático)": "ÁREA DO CURSO (automático)"},
-    inplace=True
-)
-
-
-df_filtrado["ÁREA DO CURSO (automático)"] = (
-    df_filtrado["ÁREA DO CURSO (automático)"]
-    .str.strip()
-    .str.upper()
-)
-
-#----------------------------------------------------#
-
-#-------------- Criar métricas a partir das executoras --------------#
-df_metrics_exec = df_filtrado.groupby(
-    ["EXECUTORA"]
-).agg(
-    total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"),
-    total_vagas_ofertadas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
-    total_inscritos=pd.NamedAgg(column="INSCRITOS", aggfunc="sum"),
-    total_desistentes=pd.NamedAgg(column="DESISTENTES", aggfunc="sum"),
-    total_concludentes=pd.NamedAgg(column="CONCLUDENTES", aggfunc="sum"),
-    percentual_conclusao=pd.NamedAgg(
-        column="CONCLUDENTES",
-        aggfunc=lambda x: round(
-            (x.sum() / df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum()) * 100, 2
-        ) if df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum() > 0 else 0
-    ),
-).reset_index()
-
-total_geral_turmas_exec = df_metrics_exec["total_turmas"].sum()
-total_geral_vagas_exec = df_metrics_exec["total_vagas_ofertadas"].sum()
-total_geral_inscritos_exec = df_metrics_exec["total_inscritos"].sum()
-total_geral_desistentes_exec = df_metrics_exec["total_desistentes"].sum()
-total_geral_concludentes_exec = df_metrics_exec["total_concludentes"].sum()
-
-# Cálculo seguro também para as métricas agregadas por executora
-# Nota: O df_metrics_exec já está agregado, então para ser preciso precisaríamos ajustar na agragação. 
-# Mas como estamos olhando para os totais gerais aqui:
-percentual_geral_conclusao_exec = percentual_geral_conclusao # Reutiliza a métrica global correta
-# Ou se quisermos manter independente (mas consistente):
-# percentual_geral_conclusao_exec = round(
-#     (concludentes_ajustados / total_geral_inscritos) * 100, 2
-# ) if total_geral_inscritos > 0 else 0
-#----------------------------------------------------#
-
+    # Cálculo direto do df_filtrado para evitar perda de dados por NaN no groupby
+    total_geral_turmas = df_filtrado.shape[0] # Considera cada linha uma turma
+    total_geral_vagas = df_filtrado["VAGAS OFERTADAS"].sum()
+    total_geral_inscritos = df_filtrado["INSCRITOS"].sum()
+    total_geral_desistentes = df_filtrado["DESISTENTES"].sum()
+    total_geral_concludentes = df_filtrado["CONCLUDENTES"].sum()
+    
+    # Cálculo direto (sem limitação, conforme solicitado pelo usuário)
+    concludentes_ajustados = total_geral_concludentes
+    
+    percentual_geral_conclusao = round(
+        (concludentes_ajustados / total_geral_vagas) * 100, 2
+    ) if total_geral_vagas > 0 else 0
+    
+    # Métricas de Status
+    # Robustez para encoding: verificar startsWith ou contains se necessário, 
+    # mas assumindo utf-8 correto:
+    turmas_em_execucao = df_filtrado[
+        df_filtrado["STATUS"].astype(str).str.strip() == "Em execução"
+    ].shape[0]
+    
+    turmas_concluidas = df_filtrado[
+        df_filtrado["STATUS"].astype(str).str.strip() == "Concluído"
+    ].shape[0]
     
     
-# filtrar o geojson das cozinhas para manter apenas as cozinhas presentes no dataframe mesclado (cozinhas focais)
-if algum_filtro_ativo:
-    df_ids = df_filtrado
-else:
-    df_ids = base_df  # estado original
-
-codigos_cozinhas_focais = set(
-    df_ids["id"].dropna().astype(int).astype(str)
-)
-
-features_focais_filtradas = []
-for feature in cozinhas_geojson['features']:
-    feature_id = feature['properties'].get('ID0')
-    if feature_id and str(feature_id) in codigos_cozinhas_focais:
-        features_focais_filtradas.append(feature)
-
-geojson_cozinhas_focais_filtrado = {
-    'type': cozinhas_geojson['type'],
-    'name': cozinhas_geojson['name'] + '_focais_filtrado',
-    'crs': cozinhas_geojson['crs'],
-    'features': features_focais_filtradas
-}
-
-# filtrar cozinhas CSF pelos municípios que sobraram no df_filtrado
-if algum_filtro_ativo:
-    mun_filtrados = df_filtrado["mun_upp"].dropna().unique().tolist()
-else:
-    mun_filtrados = []
-
-features_csf_filtradas = []
-for feature in cozinhas_geojson['features']:
-    mun_feat = feature["properties"].get("MUNICIPI9")
-    if not mun_filtrados or mun_feat in mun_filtrados:
-        features_csf_filtradas.append(feature)
-
-geojson_cozinhas_csf_filtrado = {
-    'type': cozinhas_geojson['type'],
-    'name': cozinhas_geojson['name'] + '_csf_filtrado',
-    'crs': cozinhas_geojson['crs'],
-    'features': features_csf_filtradas
-}
-
-
-
-# verificar se algum filtro está ativo para filtrar os municípios no mapa
-# e retornar ao estado original se não houver filtro
-if algum_filtro_ativo:
-    mun_filtrados = df_filtrado["Nome_Município"].dropna().unique().tolist()
-else:
-    mun_filtrados = []
-
-# função para filtrar municípios no geojson
-def filtra_municipios_geojson(geojson, lista_mun):
-    if not lista_mun:
-        return geojson # retorna o geojson original se a lista estiver vazia
-    
-    # Filtra as feições baseadas na propriedade 'has_qualif' (mais seguro que nome)
-    # Se 'has_qualif' não existir (caso de erro), faz fallback para o nome
-    feats = []
-    for f in geojson["features"]:
-        props = f.get("properties", {})
-        # Se temos a marcação de qualificação (vinda do merge por ID), usamos ela
-        if "has_qualif" in props:
-            if props["has_qualif"] == 1:
-                feats.append(f)
-        # Fallback: se não tiver a propriedade, tenta filtrar por nome (legado)
-        elif props.get("NM_MUN") in lista_mun:
-            feats.append(f)
-            
-    return { # retorna o geojson filtrado
-        "type": geojson["type"],
-        "name": geojson.get("name", "") + "_filtrado",
-        "crs": geojson.get("crs"),
-        "features": feats, # lista de feições filtradas
-    }
-
-# aplica a filtragem aos geojsons de municípios com qualificação e choropleth
-# Recalcula o GeoJSON Dinâmico base nos filtros
-geo_data_filtrada = preparar_dados_mapa(df_filtrado, gdf_base_municipios)
-
-# Filtro visual (se quisermos esconder as geometrias que não tem cursos)
-# O código original usava "filtra_municipios_geojson" baseado em nomes.
-# Como agora temos "has_qualif" dinâmico, podemos usar isso se quisermos.
-# Mas para consistência com o pedido do usuário (filtrar o mapa), vamos manter a lógica de SOMENTE mostrar municípios do filtro?
-# O código anterior filtrava geometry...
-# Vamos aplicar a função filtra_municipios_geojson no resultado dinâmico.
-
-# Ajuste: A função filtra_municipios_geojson trabalha com properties['NM_MUN']. Precisa gartantir que o merge manteve essa coluna.
-# (GPD merge maintaint columns of left df by default).
-
-municipios_com_qualificacao_filtrado = filtra_municipios_geojson(
-    geo_data_filtrada, 
-    mun_filtrados,
-)
-
-municipios_choropleth_filtrado = filtra_municipios_geojson(
-    geo_data_filtrada,
-    mun_filtrados,
-)
-
-# Atualiza colormap dinamicamente baseado nos dados visíveis?
-# Ou mantemos estático 0-100? Melhor estático 0-100 para consistência visual.
-colormap_conclusao = linear.YlGn_09.scale(0, 100)
-colormap_conclusao.caption = "Percentual de conclusão (%)"
-
-# Se nenhum filtro ativo, reseta o estado do mapa para o centro e zoom iniciais
-if not algum_filtro_ativo:
-    st.session_state.map_state = {"center": [-5.3159, -39.2129], "zoom": 7}
-
-#----------------------------------------------------#
-
-
-# Mapa interativo
-# Mapa interativo
-# st.markdown(
-#     "<h2 style='color:#6c91c8; font-weight:600; margin:0'>"
-#     "Mapa Interativo de Cursos por Município"
-#     "</h2>",
-#     unsafe_allow_html=True,
-# )
-
-# Ajustar a grade de layout
-col_mapa, col_metricas = st.columns([1.3, 1])
-
-with col_mapa:
-    st.markdown(
-        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
-        "Visualização Geoespacial"
-        "</h4>",
-        unsafe_allow_html=True,
+    df_filtrado.rename(
+        columns={"ÁREA DO CURSO\n(automático)": "ÁREA DO CURSO (automático)"},
+        inplace=True
     )
     
-    # Chamada do fragmento (somente ele reroda nos cliques do mapa)
-    # @st.fragment
-    # Inserir o fragmento do mapa
-    @st.fragment
-    def mapa_fragment(
-        municipios_geojson,
-        geojson_cozinhas_csf_filtrado,
-        geojson_cozinhas_focais_filtrado,
-        municipios_com_qualificacao_filtrado, 
-        municipios_choropleth_filtrado, 
-        colormap_conclusao
-    ):
+    
+    df_filtrado["ÁREA DO CURSO (automático)"] = (
+        df_filtrado["ÁREA DO CURSO (automático)"]
+        .str.strip()
+        .str.upper()
+    )
+    
+    #----------------------------------------------------#
+    
+    #-------------- Criar métricas a partir das executoras --------------#
+    df_metrics_exec = df_filtrado.groupby(
+        ["EXECUTORA"]
+    ).agg(
+        total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"),
+        total_vagas_ofertadas=pd.NamedAgg(column="VAGAS OFERTADAS", aggfunc="sum"),
+        total_inscritos=pd.NamedAgg(column="INSCRITOS", aggfunc="sum"),
+        total_desistentes=pd.NamedAgg(column="DESISTENTES", aggfunc="sum"),
+        total_concludentes=pd.NamedAgg(column="CONCLUDENTES", aggfunc="sum"),
+        percentual_conclusao=pd.NamedAgg(
+            column="CONCLUDENTES",
+            aggfunc=lambda x: round(
+                (x.sum() / df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum()) * 100, 2
+            ) if df_filtrado.loc[x.index, "VAGAS OFERTADAS"].sum() > 0 else 0
+        ),
+    ).reset_index()
+    
+    total_geral_turmas_exec = df_metrics_exec["total_turmas"].sum()
+    total_geral_vagas_exec = df_metrics_exec["total_vagas_ofertadas"].sum()
+    total_geral_inscritos_exec = df_metrics_exec["total_inscritos"].sum()
+    total_geral_desistentes_exec = df_metrics_exec["total_desistentes"].sum()
+    total_geral_concludentes_exec = df_metrics_exec["total_concludentes"].sum()
+    
+    # Cálculo seguro também para as métricas agregadas por executora
+    # Nota: O df_metrics_exec já está agregado, então para ser preciso precisaríamos ajustar na agragação. 
+    # Mas como estamos olhando para os totais gerais aqui:
+    percentual_geral_conclusao_exec = percentual_geral_conclusao # Reutiliza a métrica global correta
+    # Ou se quisermos manter independente (mas consistente):
+    # percentual_geral_conclusao_exec = round(
+    #     (concludentes_ajustados / total_geral_inscritos) * 100, 2
+    # ) if total_geral_inscritos > 0 else 0
+    #----------------------------------------------------#
+    
         
-        # Elementos do mapa
-        tooltip_municipios = folium.GeoJsonTooltip(
-            fields=[
-            "NM_MUN",
-            "total_turmas",
-            "total_concludentes",
-            "percentual_conclusao",
-            ],
-            aliases=[
-                "Município:",
-                "Total de turmas:",
-                "Total de concluintes:",
-                "% de conclusão:",
-            ],
-            localize=True,
+        
+    # filtrar o geojson das cozinhas para manter apenas as cozinhas presentes no dataframe mesclado (cozinhas focais)
+    if algum_filtro_ativo:
+        df_ids = df_filtrado
+    else:
+        df_ids = base_df  # estado original
+    
+    codigos_cozinhas_focais = set(
+        df_ids["id"].dropna().astype(int).astype(str)
+    )
+    
+    features_focais_filtradas = []
+    for feature in cozinhas_geojson['features']:
+        feature_id = feature['properties'].get('ID0')
+        if feature_id and str(feature_id) in codigos_cozinhas_focais:
+            features_focais_filtradas.append(feature)
+    
+    geojson_cozinhas_focais_filtrado = {
+        'type': cozinhas_geojson['type'],
+        'name': cozinhas_geojson['name'] + '_focais_filtrado',
+        'crs': cozinhas_geojson['crs'],
+        'features': features_focais_filtradas
+    }
+    
+    # filtrar cozinhas CSF pelos municípios que sobraram no df_filtrado
+    if algum_filtro_ativo:
+        mun_filtrados = df_filtrado["mun_upp"].dropna().unique().tolist()
+    else:
+        mun_filtrados = []
+    
+    features_csf_filtradas = []
+    for feature in cozinhas_geojson['features']:
+        mun_feat = feature["properties"].get("MUNICIPI9")
+        if not mun_filtrados or mun_feat in mun_filtrados:
+            features_csf_filtradas.append(feature)
+    
+    geojson_cozinhas_csf_filtrado = {
+        'type': cozinhas_geojson['type'],
+        'name': cozinhas_geojson['name'] + '_csf_filtrado',
+        'crs': cozinhas_geojson['crs'],
+        'features': features_csf_filtradas
+    }
+    
+    
+    
+    # verificar se algum filtro está ativo para filtrar os municípios no mapa
+    # e retornar ao estado original se não houver filtro
+    if algum_filtro_ativo:
+        mun_filtrados = df_filtrado["Nome_Município"].dropna().unique().tolist()
+    else:
+        mun_filtrados = []
+    
+    # função para filtrar municípios no geojson
+    def filtra_municipios_geojson(geojson, lista_mun):
+        if not lista_mun:
+            return geojson # retorna o geojson original se a lista estiver vazia
+        
+        # Filtra as feições baseadas na propriedade 'has_qualif' (mais seguro que nome)
+        # Se 'has_qualif' não existir (caso de erro), faz fallback para o nome
+        feats = []
+        for f in geojson["features"]:
+            props = f.get("properties", {})
+            # Se temos a marcação de qualificação (vinda do merge por ID), usamos ela
+            if "has_qualif" in props:
+                if props["has_qualif"] == 1:
+                    feats.append(f)
+            # Fallback: se não tiver a propriedade, tenta filtrar por nome (legado)
+            elif props.get("NM_MUN") in lista_mun:
+                feats.append(f)
+                
+        return { # retorna o geojson filtrado
+            "type": geojson["type"],
+            "name": geojson.get("name", "") + "_filtrado",
+            "crs": geojson.get("crs"),
+            "features": feats, # lista de feições filtradas
+        }
+    
+    # aplica a filtragem aos geojsons de municípios com qualificação e choropleth
+    # Recalcula o GeoJSON Dinâmico base nos filtros
+    geo_data_filtrada = preparar_dados_mapa(df_filtrado, gdf_base_municipios)
+    
+    # Filtro visual (se quisermos esconder as geometrias que não tem cursos)
+    # O código original usava "filtra_municipios_geojson" baseado em nomes.
+    # Como agora temos "has_qualif" dinâmico, podemos usar isso se quisermos.
+    # Mas para consistência com o pedido do usuário (filtrar o mapa), vamos manter a lógica de SOMENTE mostrar municípios do filtro?
+    # O código anterior filtrava geometry...
+    # Vamos aplicar a função filtra_municipios_geojson no resultado dinâmico.
+    
+    # Ajuste: A função filtra_municipios_geojson trabalha com properties['NM_MUN']. Precisa gartantir que o merge manteve essa coluna.
+    # (GPD merge maintaint columns of left df by default).
+    
+    municipios_com_qualificacao_filtrado = filtra_municipios_geojson(
+        geo_data_filtrada, 
+        mun_filtrados,
+    )
+    
+    municipios_choropleth_filtrado = filtra_municipios_geojson(
+        geo_data_filtrada,
+        mun_filtrados,
+    )
+    
+    # Atualiza colormap dinamicamente baseado nos dados visíveis?
+    # Ou mantemos estático 0-100? Melhor estático 0-100 para consistência visual.
+    colormap_conclusao = linear.YlGn_09.scale(0, 100)
+    colormap_conclusao.caption = "Percentual de conclusão (%)"
+    
+    # Se nenhum filtro ativo, reseta o estado do mapa para o centro e zoom iniciais
+    if not algum_filtro_ativo:
+        st.session_state.map_state = {"center": [-5.3159, -39.2129], "zoom": 7}
+    
+    #----------------------------------------------------#
+    
+    
+    # Mapa interativo
+    # Mapa interativo
+    # st.markdown(
+    #     "<h2 style='color:#6c91c8; font-weight:600; margin:0'>"
+    #     "Mapa Interativo de Cursos por Município"
+    #     "</h2>",
+    #     unsafe_allow_html=True,
+    # )
+    
+    # Ajustar a grade de layout
+    col_mapa, col_metricas = st.columns([1.3, 1])
+    
+    with col_mapa:
+        st.markdown(
+            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "Visualização Geoespacial"
+            "</h4>",
+            unsafe_allow_html=True,
         )
-
-        if "map_state" not in st.session_state:
-            st.session_state.map_state = {"center": [-5.3159, -39.2129], "zoom": 7}
-
-        m = folium.Map(
-            location=st.session_state.map_state["center"],
-            zoom_start=st.session_state.map_state["zoom"]
-        )
         
-        # plugins folium
-        Draw(export=False, position='bottomleft').add_to(m)
-        
-        folium.plugins.Fullscreen(
-            position="topleft",
-            title="Expand me",
-            title_cancel="Exit me",
-            force_separate_button=True,
-            force_separate_button_title="Expandir",
-        ).add_to(m)
-        
-        
-
-        # Controle de camadas
-        folium.TileLayer("OpenStreetMap").add_to(m)
-        
-        
-        municipios_qualif_feature_group = folium.FeatureGroup(name="Municípios com Qualificação").add_to(m)
-        folium.GeoJson(
-            municipios_com_qualificacao_filtrado,
-            name="Municípios com Qualificação",
-            style_function=lambda feature: {
-                "fillColor": "#4e90cc" 
-                if feature["properties"]["has_qualif"] == 1 
-                else '#f7e350',
-                'color': 'red',
-                'weight': 1,
-                'dashArray': '5, 5',
-                'fillOpacity': 0.6,
-            },
-            tooltip=tooltip_municipios,
-        ).add_to(municipios_qualif_feature_group)
-        
-       
-        # -------- NOVA CAMADA: Choropleth % conclusão --------
-        choropleth_feature_group_indicadores = folium.FeatureGroup(
-            name="Percentual de conclusão",
-            show=False,
-        ).add_to(m)
-
-        def style_conclusao(feature):
-            # pega o percentual da propriedade; se não houver, usa 0
-            valor = feature["properties"].get("percentual_conclusao")
-            if valor is None:
+        # Chamada do fragmento (somente ele reroda nos cliques do mapa)
+        # @st.fragment
+        # Inserir o fragmento do mapa
+        @st.fragment
+        def mapa_fragment(
+            municipios_geojson,
+            geojson_cozinhas_csf_filtrado,
+            geojson_cozinhas_focais_filtrado,
+            municipios_com_qualificacao_filtrado, 
+            municipios_choropleth_filtrado, 
+            colormap_conclusao
+        ):
+            
+            # Elementos do mapa
+            tooltip_municipios = folium.GeoJsonTooltip(
+                fields=[
+                "NM_MUN",
+                "total_turmas",
+                "total_concludentes",
+                "percentual_conclusao",
+                ],
+                aliases=[
+                    "Município:",
+                    "Total de turmas:",
+                    "Total de concluintes:",
+                    "% de conclusão:",
+                ],
+                localize=True,
+            )
+    
+            if "map_state" not in st.session_state:
+                st.session_state.map_state = {"center": [-5.3159, -39.2129], "zoom": 7}
+    
+            m = folium.Map(
+                location=st.session_state.map_state["center"],
+                zoom_start=st.session_state.map_state["zoom"]
+            )
+            
+            # plugins folium
+            Draw(export=False, position='bottomleft').add_to(m)
+            
+            folium.plugins.Fullscreen(
+                position="topleft",
+                title="Expand me",
+                title_cancel="Exit me",
+                force_separate_button=True,
+                force_separate_button_title="Expandir",
+            ).add_to(m)
+            
+            
+    
+            # Controle de camadas
+            folium.TileLayer("OpenStreetMap").add_to(m)
+            
+            
+            municipios_qualif_feature_group = folium.FeatureGroup(name="Municípios com Qualificação").add_to(m)
+            folium.GeoJson(
+                municipios_com_qualificacao_filtrado,
+                name="Municípios com Qualificação",
+                style_function=lambda feature: {
+                    "fillColor": "#4e90cc" 
+                    if feature["properties"]["has_qualif"] == 1 
+                    else '#f7e350',
+                    'color': 'red',
+                    'weight': 1,
+                    'dashArray': '5, 5',
+                    'fillOpacity': 0.6,
+                },
+                tooltip=tooltip_municipios,
+            ).add_to(municipios_qualif_feature_group)
+            
+           
+            # -------- NOVA CAMADA: Choropleth % conclusão --------
+            choropleth_feature_group_indicadores = folium.FeatureGroup(
+                name="Percentual de conclusão",
+                show=False,
+            ).add_to(m)
+    
+            def style_conclusao(feature):
+                # pega o percentual da propriedade; se não houver, usa 0
+                valor = feature["properties"].get("percentual_conclusao")
+                if valor is None:
+                    return {
+                        "fillColor": "#cccccc",   # cinza para sem dado
+                        "color": "black",
+                        "weight": 0.5,
+                        "fillOpacity": 0.4,
+                    }
                 return {
-                    "fillColor": "#cccccc",   # cinza para sem dado
+                    "fillColor": colormap_conclusao(valor),
                     "color": "black",
                     "weight": 0.5,
-                    "fillOpacity": 0.4,
+                    "fillOpacity": 0.7,
                 }
-            return {
-                "fillColor": colormap_conclusao(valor),
-                "color": "black",
-                "weight": 0.5,
-                "fillOpacity": 0.7,
-            }
-
-        folium.GeoJson(
-            municipios_choropleth_filtrado,
-            name="Percentual de conclusão",
-            style_function=style_conclusao,
-            tooltip=folium.GeoJsonTooltip(
-                fields=["NM_MUN", "percentual_conclusao"],
-                aliases=["Município:", "Percentual conclusão:"],
-                localize=True,
-            ),
-        ).add_to(choropleth_feature_group_indicadores)
-
-        # adiciona a legenda do colormap ao mapa
-        colormap_conclusao.add_to(m)
-
-        
-
-        cozinhas_csf_feature_group = folium.FeatureGroup(name="Cozinhas CSF", show=False).add_to(m)
-        folium.GeoJson(
-            geojson_cozinhas_csf_filtrado,
-            name="Cozinhas CSF",
-            marker=folium.Marker(icon=cozinha_csf_icon),
-            # tooltip=folium.GeoJsonTooltip(
-            #     fields=["NOME_USP1", "ID0", "LOTE4"],
-            #     aliases=["Nome da Cozinha: ", "ID da Cozinha: ", "Lote: "],
-            #     localize=True,
-            # ),
-        ).add_to(cozinhas_csf_feature_group)
-
-        cozinhas_focais_feature_group = folium.FeatureGroup(name="Cozinhas Focais", show=False).add_to(m)
-        folium.GeoJson(
-            geojson_cozinhas_focais_filtrado,
-            name="Cozinhas Focais",
-            marker=folium.Marker(icon=cozinha_focal_icon),
-            # tooltip=folium.GeoJsonTooltip(
-            #     fields=["NOME_USP1", "ID0", "LOTE4"],
-            #     aliases=["Nome da Cozinha: ", "ID da Cozinha: ", "Lote: "],
-            #     localize=True,
-            # ),
-        ).add_to(cozinhas_focais_feature_group)
-
-        folium.LayerControl().add_to(m)
-
-        # >>> AQUI é onde a mágica acontece <<<
-        st_data = st_folium(
-                    m,
-                    width=None,              # deixa o CSS controlar a largura
-                    height=550,              # um pouco menor, pra equilibrar com os cards
-                    key="mapa_qualificacao",
-                    returned_objects=["last_object_clicked"],
-                    center=st.session_state.map_state["center"],
-                    zoom=st.session_state.map_state["zoom"],
-                )
-
-
-        # Atualiza o estado global com as interações do mapa
-        if st_data:
-            if st_data.get("last_object_clicked"):
-                st.session_state.last_click = st_data["last_object_clicked"]
-            if st_data.get("bounds"):
-                st.session_state.bounds = st_data["bounds"]
-                
-            if st_data.get("center"):
-                st.session_state.map_state["center"] = st_data["center"]
-            if st_data.get("zoom") is not None:
-                st.session_state.map_state["zoom"] = st_data["zoom"]
+    
+            folium.GeoJson(
+                municipios_choropleth_filtrado,
+                name="Percentual de conclusão",
+                style_function=style_conclusao,
+                tooltip=folium.GeoJsonTooltip(
+                    fields=["NM_MUN", "percentual_conclusao"],
+                    aliases=["Município:", "Percentual conclusão:"],
+                    localize=True,
+                ),
+            ).add_to(choropleth_feature_group_indicadores)
+    
+            # adiciona a legenda do colormap ao mapa
+            colormap_conclusao.add_to(m)
+    
             
     
-
-
-
-    # Chamada do fragmento (somente ele reroda nos cliques do mapa)
-    mapa_fragment(
-        municipios_geojson=municipios_geojson,
-        geojson_cozinhas_csf_filtrado=geojson_cozinhas_csf_filtrado,
-        geojson_cozinhas_focais_filtrado=geojson_cozinhas_focais_filtrado,
-        municipios_com_qualificacao_filtrado=municipios_com_qualificacao_filtrado,
-        municipios_choropleth_filtrado=municipios_choropleth_filtrado,
-        colormap_conclusao=colormap_conclusao, 
-    )
-
-
-# --- MÉTRICAS À DIREITA ---
-
-# Custom CSS para estilizar os st.metrics
-
-
-
-
-def format_int_br(valor):
-    """Formata inteiro com separador de milhar no padrão brasileiro."""
-    if pd.isna(valor):
-        return "-"
-    return f"{int(valor):,}".replace(",", ".")
-
-def format_percent_br(valor, casas=2):
-    """Formata percentual no padrão brasileiro (vírgula decimal)."""
-    if pd.isna(valor):
-        return "-"
-    txt = f"{valor:.{casas}f}"
-    return txt.replace(".", ",") + " %"
-
-
-with col_metricas:
-    st.markdown(
-        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
-        "Indicadores Gerais"
-        "</h4>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        "<p style='color:#6b7280; font-size:0.85rem; margin-bottom:0.5rem;'>"
-        "Os valores abaixo refletem o recorte atual dos filtros à esquerda."
-        "</p>",
-        unsafe_allow_html=True,
-    )
-
-    # Grupo 1 – Escala do Programa
-    g1c1, g1c2, g1c3 = st.columns(3)
-
-    with g1c1:
-        st.metric("📘 Turmas", format_int_br(total_geral_turmas))
-
-    with g1c2:
-        # (Lógica de debug movida para seção de diagnóstico abaixo)
-
-
-        # Se preferir contar por NOME (159), mude para 'Nome_Município'
-        # Se preferir contar por CÓDIGO (160), mantenha 'Código Município Completo'
-        st.metric(
-            "🗺️ Municípios atendidos",
-            format_int_br(df_filtrado['Código Município Completo'].nunique()),
-        )
-
-    with g1c3:
-        st.metric("🎯 Vagas ofertadas", format_int_br(total_geral_vagas))
-
-
-
-
-    # Espaço entre os grupos
-    st.markdown("<br/>", unsafe_allow_html=True)
-
-    # Grupo 2 – Participação e Conclusão
-    g2c1, g2c2, g2c3 = st.columns(3)
-
-    with g2c1:
-        st.metric("👥 Inscritos", format_int_br(total_geral_inscritos))
-
-    with g2c2:
-        st.metric("🏅 Concludentes", format_int_br(concludentes_ajustados))
-
-    with g2c3:
-        st.metric(
-            "📈 Conclusão geral (%)", 
-            format_percent_br(percentual_geral_conclusao),
-            help="Cálculo: (Total de Concludentes / Total de Vagas Ofertadas) * 100"
-        )
-        
-    # Grupo 3 – Status das Turmas
-    st.markdown("<br/>", unsafe_allow_html=True)
-    g3c1, g3c2 = st.columns(2) 
+            cozinhas_csf_feature_group = folium.FeatureGroup(name="Cozinhas CSF", show=False).add_to(m)
+            folium.GeoJson(
+                geojson_cozinhas_csf_filtrado,
+                name="Cozinhas CSF",
+                marker=folium.Marker(icon=cozinha_csf_icon),
+                # tooltip=folium.GeoJsonTooltip(
+                #     fields=["NOME_USP1", "ID0", "LOTE4"],
+                #     aliases=["Nome da Cozinha: ", "ID da Cozinha: ", "Lote: "],
+                #     localize=True,
+                # ),
+            ).add_to(cozinhas_csf_feature_group)
     
-    with g3c1:
-        st.metric("⏳ Turmas em Execução", format_int_br(turmas_em_execucao))
+            cozinhas_focais_feature_group = folium.FeatureGroup(name="Cozinhas Focais", show=False).add_to(m)
+            folium.GeoJson(
+                geojson_cozinhas_focais_filtrado,
+                name="Cozinhas Focais",
+                marker=folium.Marker(icon=cozinha_focal_icon),
+                # tooltip=folium.GeoJsonTooltip(
+                #     fields=["NOME_USP1", "ID0", "LOTE4"],
+                #     aliases=["Nome da Cozinha: ", "ID da Cozinha: ", "Lote: "],
+                #     localize=True,
+                # ),
+            ).add_to(cozinhas_focais_feature_group)
+    
+            folium.LayerControl().add_to(m)
+    
+            # >>> AQUI é onde a mágica acontece <<<
+            st_data = st_folium(
+                        m,
+                        width=None,              # deixa o CSS controlar a largura
+                        height=550,              # um pouco menor, pra equilibrar com os cards
+                        key="mapa_qualificacao",
+                        returned_objects=["last_object_clicked"],
+                        center=st.session_state.map_state["center"],
+                        zoom=st.session_state.map_state["zoom"],
+                    )
+    
+    
+            # Atualiza o estado global com as interações do mapa
+            if st_data:
+                if st_data.get("last_object_clicked"):
+                    st.session_state.last_click = st_data["last_object_clicked"]
+                if st_data.get("bounds"):
+                    st.session_state.bounds = st_data["bounds"]
+                    
+                if st_data.get("center"):
+                    st.session_state.map_state["center"] = st_data["center"]
+                if st_data.get("zoom") is not None:
+                    st.session_state.map_state["zoom"] = st_data["zoom"]
+                
         
-    with g3c2:
-        st.metric("✅ Turmas Concluídas", format_int_br(turmas_concluidas))
-
-#----------------------------------------------------#
-
-
-
-# -------------------------------------------------------------------
-# Análises Temporais dos Cursos
-# -------------------------------------------------------------------
-
-st.subheader("Análises Temporais dos Cursos")
-
-# Garantir que temos datas válidas depois de todos os filtros
-if (
-    col_data_inicio in df_filtrado.columns
-    and df_filtrado[col_data_inicio].notna().sum() > 0
-):
-
-    # 1) Série temporal de turmas iniciadas por mês
-    df_temporal = (
-        df_filtrado
-        .dropna(subset=[col_data_inicio])
-        .copy()
-    )
-    df_temporal["PERIODO_M"] = df_temporal[col_data_inicio].dt.to_period("M")
-    df_temporal_group = (
-        df_temporal
-        .groupby("PERIODO_M")
-        .size()
-        .reset_index(name="qtd_turmas")
-    )
-    df_temporal_group["DATA"] = df_temporal_group["PERIODO_M"].dt.to_timestamp()
-
-    chart_turmas_mes = (
-        alt.Chart(df_temporal_group)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("DATA:T", title="Mês de início"),
-            y=alt.Y("qtd_turmas:Q", title="Quantidade de turmas"),
-            tooltip=["DATA:T", "qtd_turmas:Q"],
+    
+    
+    
+        # Chamada do fragmento (somente ele reroda nos cliques do mapa)
+        mapa_fragment(
+            municipios_geojson=municipios_geojson,
+            geojson_cozinhas_csf_filtrado=geojson_cozinhas_csf_filtrado,
+            geojson_cozinhas_focais_filtrado=geojson_cozinhas_focais_filtrado,
+            municipios_com_qualificacao_filtrado=municipios_com_qualificacao_filtrado,
+            municipios_choropleth_filtrado=municipios_choropleth_filtrado,
+            colormap_conclusao=colormap_conclusao, 
         )
-        .properties(
-            height=300,
-            title="Turmas iniciadas por mês",
+    
+    
+    # --- MÉTRICAS À DIREITA ---
+    
+    # Custom CSS para estilizar os st.metrics
+    
+    
+    
+    
+    def format_int_br(valor):
+        """Formata inteiro com separador de milhar no padrão brasileiro."""
+        if pd.isna(valor):
+            return "-"
+        return f"{int(valor):,}".replace(",", ".")
+    
+    def format_percent_br(valor, casas=2):
+        """Formata percentual no padrão brasileiro (vírgula decimal)."""
+        if pd.isna(valor):
+            return "-"
+        txt = f"{valor:.{casas}f}"
+        return txt.replace(".", ",") + " %"
+    
+    
+    with col_metricas:
+        st.markdown(
+            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "Indicadores Gerais"
+            "</h4>",
+            unsafe_allow_html=True,
         )
-    )
-
-    st.altair_chart(chart_turmas_mes, use_container_width=True)
-
-    # 2) Turmas por trimestre (se a coluna existir)
-    if "TRIMESTRE" in df_filtrado.columns:
-        df_trim = (
+    
+        st.markdown(
+            "<p style='color:#6b7280; font-size:0.85rem; margin-bottom:0.5rem;'>"
+            "Os valores abaixo refletem o recorte atual dos filtros à esquerda."
+            "</p>",
+            unsafe_allow_html=True,
+        )
+    
+        # Grupo 1 – Escala do Programa
+        g1c1, g1c2, g1c3 = st.columns(3)
+    
+        with g1c1:
+            st.metric("📘 Turmas", format_int_br(total_geral_turmas))
+    
+        with g1c2:
+            # (Lógica de debug movida para seção de diagnóstico abaixo)
+    
+    
+            # Se preferir contar por NOME (159), mude para 'Nome_Município'
+            # Se preferir contar por CÓDIGO (160), mantenha 'Código Município Completo'
+            st.metric(
+                "🗺️ Municípios atendidos",
+                format_int_br(df_filtrado['Código Município Completo'].nunique()),
+            )
+    
+        with g1c3:
+            st.metric("🎯 Vagas ofertadas", format_int_br(total_geral_vagas))
+    
+    
+    
+    
+        # Espaço entre os grupos
+        st.markdown("<br/>", unsafe_allow_html=True)
+    
+        # Grupo 2 – Participação e Conclusão
+        g2c1, g2c2, g2c3 = st.columns(3)
+    
+        with g2c1:
+            st.metric("👥 Inscritos", format_int_br(total_geral_inscritos))
+    
+        with g2c2:
+            st.metric("🏅 Concludentes", format_int_br(concludentes_ajustados))
+    
+        with g2c3:
+            st.metric(
+                "📈 Conclusão geral (%)", 
+                format_percent_br(percentual_geral_conclusao),
+                help="Cálculo: (Total de Concludentes / Total de Vagas Ofertadas) * 100"
+            )
+            
+        # Grupo 3 – Status das Turmas
+        st.markdown("<br/>", unsafe_allow_html=True)
+        g3c1, g3c2 = st.columns(2) 
+        
+        with g3c1:
+            st.metric("⏳ Turmas em Execução", format_int_br(turmas_em_execucao))
+            
+        with g3c2:
+            st.metric("✅ Turmas Concluídas", format_int_br(turmas_concluidas))
+    
+    #----------------------------------------------------#
+    
+    
+    
+    # -------------------------------------------------------------------
+    # Análises Temporais dos Cursos
+    # -------------------------------------------------------------------
+    
+    st.subheader("Análises Temporais dos Cursos")
+    
+    # Garantir que temos datas válidas depois de todos os filtros
+    if (
+        col_data_inicio in df_filtrado.columns
+        and df_filtrado[col_data_inicio].notna().sum() > 0
+    ):
+    
+        # 1) Série temporal de turmas iniciadas por mês
+        df_temporal = (
             df_filtrado
-            .groupby("TRIMESTRE")["CURSO"]
-            .count()
-            .reset_index(name="qtd_turmas")
+            .dropna(subset=[col_data_inicio])
+            .copy()
         )
-
-        chart_trim = (
-            alt.Chart(df_trim)
-            .mark_bar()
-            .encode(
-                x=alt.X("TRIMESTRE:N", title="Trimestre"),
-                y=alt.Y("qtd_turmas:Q", title="Quantidade de turmas"),
-                tooltip=["TRIMESTRE", "qtd_turmas"],
-            )
-            .properties(
-                height=300,
-                title="Turmas por trimestre",
-            )
-        )
-
-        st.altair_chart(chart_trim, use_container_width=True)
-
-    # 3) Evolução de turmas por executora ao longo do tempo (se a coluna existir)
-    if "EXECUTORA" in df_filtrado.columns:
-        df_exec_tempo = (
+        df_temporal["PERIODO_M"] = df_temporal[col_data_inicio].dt.to_period("M")
+        df_temporal_group = (
             df_temporal
-            .groupby(["PERIODO_M", "EXECUTORA"])
+            .groupby("PERIODO_M")
             .size()
             .reset_index(name="qtd_turmas")
         )
-        df_exec_tempo["DATA"] = df_exec_tempo["PERIODO_M"].dt.to_timestamp()
-
-        chart_exec = (
-            alt.Chart(df_exec_tempo)
+        df_temporal_group["DATA"] = df_temporal_group["PERIODO_M"].dt.to_timestamp()
+    
+        chart_turmas_mes = (
+            alt.Chart(df_temporal_group)
             .mark_line(point=True)
             .encode(
                 x=alt.X("DATA:T", title="Mês de início"),
-                y=alt.Y("qtd_turmas:Q", title="Turmas iniciadas"),
+                y=alt.Y("qtd_turmas:Q", title="Quantidade de turmas"),
+                tooltip=["DATA:T", "qtd_turmas:Q"],
+            )
+            .properties(
+                height=300,
+                title="Turmas iniciadas por mês",
+            )
+        )
+    
+        st.altair_chart(chart_turmas_mes, use_container_width=True)
+    
+        # 2) Turmas por trimestre (se a coluna existir)
+        if "TRIMESTRE" in df_filtrado.columns:
+            df_trim = (
+                df_filtrado
+                .groupby("TRIMESTRE")["CURSO"]
+                .count()
+                .reset_index(name="qtd_turmas")
+            )
+    
+            chart_trim = (
+                alt.Chart(df_trim)
+                .mark_bar()
+                .encode(
+                    x=alt.X("TRIMESTRE:N", title="Trimestre"),
+                    y=alt.Y("qtd_turmas:Q", title="Quantidade de turmas"),
+                    tooltip=["TRIMESTRE", "qtd_turmas"],
+                )
+                .properties(
+                    height=300,
+                    title="Turmas por trimestre",
+                )
+            )
+    
+            st.altair_chart(chart_trim, use_container_width=True)
+    
+        # 3) Evolução de turmas por executora ao longo do tempo (se a coluna existir)
+        if "EXECUTORA" in df_filtrado.columns:
+            df_exec_tempo = (
+                df_temporal
+                .groupby(["PERIODO_M", "EXECUTORA"])
+                .size()
+                .reset_index(name="qtd_turmas")
+            )
+            df_exec_tempo["DATA"] = df_exec_tempo["PERIODO_M"].dt.to_timestamp()
+    
+            chart_exec = (
+                alt.Chart(df_exec_tempo)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("DATA:T", title="Mês de início"),
+                    y=alt.Y("qtd_turmas:Q", title="Turmas iniciadas"),
+                    color=alt.Color("EXECUTORA:N", title="Executora"),
+                    tooltip=["EXECUTORA", "DATA:T", "qtd_turmas:Q"],
+                )
+                .properties(
+                    height=350,
+                    title="Evolução das turmas iniciadas por executora",
+                )
+            )
+    
+            st.altair_chart(chart_exec, use_container_width=True)
+    
+    
+    
+    
+    
+    
+    
+    
+    # -------------------------------------------------------------
+    # Scatter Plot: Duração dos cursos × Taxa de conclusão (%)
+    # -------------------------------------------------------------
+    if "DURACAO_DIAS" in df_filtrado.columns and "TAXA_CONCLUSAO" in df_filtrado.columns:
+    
+        chart_taxa = (
+            alt.Chart(df_filtrado)
+            .mark_circle(size=70, opacity=0.7)
+            .encode(
+                x=alt.X("DURACAO_DIAS:Q", title="Duração do curso (dias)"),
+                y=alt.Y("TAXA_CONCLUSAO:Q", title="Taxa de Conclusão (%)"),
                 color=alt.Color("EXECUTORA:N", title="Executora"),
-                tooltip=["EXECUTORA", "DATA:T", "qtd_turmas:Q"],
+                tooltip=["CURSO", "EXECUTORA", "DURACAO_DIAS", "CONCLUDENTES", "VAGAS OFERTADAS", "TAXA_CONCLUSAO"],
+            )
+            .properties(
+                title="Duração do Curso × Taxa de Conclusão (%)",
+                height=350,
+            )
+        )
+    
+        st.altair_chart(chart_taxa, use_container_width=True)
+    # -------------------------------------------------------------------
+    
+    
+    # -------------------------------------------------------------
+    # Taxa média de conclusão por área de qualificação
+    # -------------------------------------------------------------
+    if "ÁREA DO CURSO (automático)" in df_filtrado.columns and "TAXA_CONCLUSAO" in df_filtrado.columns:
+    
+        df_area = (
+            df_filtrado
+            .groupby("ÁREA DO CURSO (automático)")["TAXA_CONCLUSAO"]
+            .mean()
+            .reset_index()
+        )
+    
+        chart_area = (
+            alt.Chart(df_area)
+            .mark_bar()
+            .encode(
+                x=alt.X("TAXA_CONCLUSAO:Q", title="Taxa média de conclusão (%)"),
+                y=alt.Y("ÁREA DO CURSO (automático):N", title="Área de qualificação"),
+                color=alt.Color("ÁREA DO CURSO (automático):N", legend=None),
+                tooltip=["ÁREA DO CURSO (automático)", "TAXA_CONCLUSAO"],
             )
             .properties(
                 height=350,
-                title="Evolução das turmas iniciadas por executora",
+                title="Taxa Média de Conclusão por Área de Qualificação",
             )
         )
-
-        st.altair_chart(chart_exec, use_container_width=True)
-
-
-
-
-
-
-
-
-# -------------------------------------------------------------
-# Scatter Plot: Duração dos cursos × Taxa de conclusão (%)
-# -------------------------------------------------------------
-if "DURACAO_DIAS" in df_filtrado.columns and "TAXA_CONCLUSAO" in df_filtrado.columns:
-
-    chart_taxa = (
+    
+        st.altair_chart(chart_area, use_container_width=True)
+    
+    
+    # -------------------------------------------------------------
+    # Boxplot: Distribuição da taxa de conclusão por área
+    # -------------------------------------------------------------
+    chart_box_area = (
         alt.Chart(df_filtrado)
-        .mark_circle(size=70, opacity=0.7)
+        .mark_boxplot(
+            size=25,          # reduz largura para evitar sobreposição
+            # extent="min-max"  # mostra todos os outliers
+        )
         .encode(
-            x=alt.X("DURACAO_DIAS:Q", title="Duração do curso (dias)"),
-            y=alt.Y("TAXA_CONCLUSAO:Q", title="Taxa de Conclusão (%)"),
-            color=alt.Color("EXECUTORA:N", title="Executora"),
-            tooltip=["CURSO", "EXECUTORA", "DURACAO_DIAS", "CONCLUDENTES", "VAGAS OFERTADAS", "TAXA_CONCLUSAO"],
+            x=alt.X(
+                "TAXA_CONCLUSAO:Q",
+                title="Taxa de Conclusão (%)",
+                # scale=alt.Scale(domain=[0, 100])
+            ),
+            y=alt.Y(
+                "ÁREA DO CURSO (automático):N",
+                title="Área de Qualificação",
+                sort="-x"      # ordena por mediana descendente
+            ),
+            color=alt.Color(
+                "ÁREA DO CURSO (automático):N",
+                # legend=None
+            ),
+            tooltip=[
+                alt.Tooltip("ÁREA DO CURSO (automático):N", title="Área"),
+                alt.Tooltip("TAXA_CONCLUSAO:Q", format=".1f", title="Taxa (%)")
+            ]
         )
         .properties(
-            title="Duração do Curso × Taxa de Conclusão (%)",
-            height=350,
+            width=1100,   # largura real
+            height=600,   # altura generosa
+            title="Distribuição da Taxa de Conclusão por Área de Qualificação"
         )
     )
-
-    st.altair_chart(chart_taxa, use_container_width=True)
-# -------------------------------------------------------------------
-
-
-# -------------------------------------------------------------
-# Taxa média de conclusão por área de qualificação
-# -------------------------------------------------------------
-if "ÁREA DO CURSO (automático)" in df_filtrado.columns and "TAXA_CONCLUSAO" in df_filtrado.columns:
-
-    df_area = (
-        df_filtrado
-        .groupby("ÁREA DO CURSO (automático)")["TAXA_CONCLUSAO"]
-        .mean()
-        .reset_index()
-    )
-
-    chart_area = (
-        alt.Chart(df_area)
-        .mark_bar()
-        .encode(
-            x=alt.X("TAXA_CONCLUSAO:Q", title="Taxa média de conclusão (%)"),
-            y=alt.Y("ÁREA DO CURSO (automático):N", title="Área de qualificação"),
-            color=alt.Color("ÁREA DO CURSO (automático):N", legend=None),
-            tooltip=["ÁREA DO CURSO (automático)", "TAXA_CONCLUSAO"],
-        )
-        .properties(
-            height=350,
-            title="Taxa Média de Conclusão por Área de Qualificação",
-        )
-    )
-
-    st.altair_chart(chart_area, use_container_width=True)
-
-
-# -------------------------------------------------------------
-# Boxplot: Distribuição da taxa de conclusão por área
-# -------------------------------------------------------------
-chart_box_area = (
-    alt.Chart(df_filtrado)
-    .mark_boxplot(
-        size=25,          # reduz largura para evitar sobreposição
-        # extent="min-max"  # mostra todos os outliers
-    )
-    .encode(
-        x=alt.X(
-            "TAXA_CONCLUSAO:Q",
-            title="Taxa de Conclusão (%)",
-            # scale=alt.Scale(domain=[0, 100])
-        ),
-        y=alt.Y(
-            "ÁREA DO CURSO (automático):N",
-            title="Área de Qualificação",
-            sort="-x"      # ordena por mediana descendente
-        ),
-        color=alt.Color(
-            "ÁREA DO CURSO (automático):N",
-            # legend=None
-        ),
-        tooltip=[
-            alt.Tooltip("ÁREA DO CURSO (automático):N", title="Área"),
-            alt.Tooltip("TAXA_CONCLUSAO:Q", format=".1f", title="Taxa (%)")
-        ]
-    )
-    .properties(
-        width=1100,   # largura real
-        height=600,   # altura generosa
-        title="Distribuição da Taxa de Conclusão por Área de Qualificação"
-    )
-)
-
-st.altair_chart(chart_box_area, theme=None)
-
-
-
-
-
-
-
-
-
-
-# Gráficos
-
-col_grafico1, col_grafico2 = st.columns(2)
-
-with col_grafico1:
-    # Gráfico de barras dos 10 municípios com mais concludentes
-    st.markdown(
-        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
-        "Top 10 Municípios por Concludentes"
-        "</h4>",
-        unsafe_allow_html=True,
-    )
-    top_mun = (
-        df_metrics.sort_values("total_concludentes", ascending=False)
-        .head(10)
-    )
-
-    chart = (
-        alt.Chart(top_mun)
-        .mark_bar()
-        .encode(
-            x=alt.X("total_concludentes:Q", title="Concludentes"),
-            y=alt.Y("Nome_Município:N", sort="-x", title="Município"),
-            tooltip=["Nome_Município", "total_concludentes"]
-        )
-        .properties(height=300)
-    )
-
-    st.altair_chart(chart, use_container_width=True)
     
-with col_grafico2:
-    # Gráfico de barras dos 10 cursos com mais turmas
-    st.markdown(
-        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
-        "Top 10 Cursos por Número de Turmas"
-        "</h4>",
-        unsafe_allow_html=True,
-    )
-    top_cursos = (
-        df_filtrado.groupby("CURSO")
-        .agg(total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"))
-        .reset_index()
-        .sort_values("total_turmas", ascending=False)
-        .head(10)
-    )
-    chart2 = (
-        alt.Chart(top_cursos)
-        .mark_bar()
-        .encode(
-            x=alt.X("total_turmas:Q", title="Número de Turmas"),
-            y=alt.Y("CURSO:N", sort="-x", title="Curso"),
-            tooltip=["CURSO", "total_turmas"]
-        )
-        .properties(height=300)
-    )
-    st.altair_chart(chart2, use_container_width=True)
+    st.altair_chart(chart_box_area, theme=None)
     
     
     
-col_grafico3, col_grafico4 = st.columns(2)
-
-with col_grafico3:
-    # Gráfico de barras dos 10 municípios com mais concludentes
-    st.markdown(
-        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
-        "Top 10 Concludentes por Executora"
-        "</h4>",
-        unsafe_allow_html=True,
-    )
-    top_exec = (
-        df_metrics_exec.sort_values("total_concludentes", ascending=False)
-        .head(10)
-    )
-
-    chart3 = (
-        alt.Chart(top_exec)
-        .mark_bar()
-        .encode(
-            x=alt.X("total_concludentes:Q", title="Concludentes"),
-            y=alt.Y("EXECUTORA:N", sort="-x", title="Executora"),
-            tooltip=["EXECUTORA", "total_concludentes"]
-        )
-        .properties(height=300)
-    )
-
-    st.altair_chart(chart3, use_container_width=True)
     
-with col_grafico4:
-    # Gráfico de barras dos 10 cursos com mais turmas
-    st.markdown(
-        "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
-        "Top 10 Turmas por Executora"
-        "</h4>",
-        unsafe_allow_html=True,
-    )
-    top_cursos = (
-        df_filtrado.groupby("EXECUTORA")['CURSO'].count()
-        .reset_index()
-        .sort_values("CURSO", ascending=False)
-    )
-    chart4 = (
-        alt.Chart(top_cursos)
-        .mark_bar()
-        .encode(
-            x=alt.X("CURSO:Q", title="Número de Turmas"),
-            y=alt.Y("EXECUTORA:N", sort="-x", title="Executora"),
-            tooltip=["EXECUTORA", "CURSO"]
-        )
-        .properties(height=300)
-    )
-    st.altair_chart(chart4, use_container_width=True)
     
-# -------------------------------------------------------------------
-# Diagnóstico de Qualidade dos Dados
-# -------------------------------------------------------------------
-with st.expander("⚠️ Diagnóstico de Qualidade dos Dados (Clique para ver)", expanded=False):
-    st.markdown("Verificação automática de inconsistências nos dados carregados.")
     
-    # 1. Checagem de Concludentes > Inscritos
-    inconsistent_rows = df_filtrado[df_filtrado["CONCLUDENTES"] > df_filtrado["INSCRITOS"]]
-    if not inconsistent_rows.empty:
-        st.error(f"Foram encontradas {len(inconsistent_rows)} turmas com mais Concludentes do que Inscritos.")
-        st.markdown("**Aviso:** *Os indicadores acima exibem os valores reais inseridos na planilha, conforme solicitado, permitindo identificar inconsistências nos dados originais.*")
-        st.dataframe(
-            inconsistent_rows[["CURSO", "Nome_Município", "INSCRITOS", "CONCLUDENTES", "TAXA_CONCLUSAO"]],
-            use_container_width=True
+    
+    
+    
+    
+    # Gráficos
+    
+    col_grafico1, col_grafico2 = st.columns(2)
+    
+    with col_grafico1:
+        # Gráfico de barras dos 10 municípios com mais concludentes
+        st.markdown(
+            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "Top 10 Municípios por Concludentes"
+            "</h4>",
+            unsafe_allow_html=True,
         )
-    else:
-        st.success("✅ Nenhuma inconsistência de 'Concludentes > Inscritos' encontrada no filtro atual.")
-
-    # 2. Checagem de Múltiplos IDs para mesma cidade
-    df_debug = df_filtrado[["Nome_Município", "Código Município Completo"]].copy()
-    if "Nome_Município" in df_debug.columns:
-        df_debug["Nome_Município"] = df_debug["Nome_Município"].astype(str).str.strip().str.upper()
-        check_dups = df_debug.groupby("Nome_Município")["Código Município Completo"].nunique()
-        dups = check_dups[check_dups > 1]
+        top_mun = (
+            df_metrics.sort_values("total_concludentes", ascending=False)
+            .head(10)
+        )
+    
+        chart = (
+            alt.Chart(top_mun)
+            .mark_bar()
+            .encode(
+                x=alt.X("total_concludentes:Q", title="Concludentes"),
+                y=alt.Y("Nome_Município:N", sort="-x", title="Município"),
+                tooltip=["Nome_Município", "total_concludentes"]
+            )
+            .properties(height=300)
+        )
+    
+        st.altair_chart(chart, use_container_width=True)
         
-        if not dups.empty:
-            st.warning(f"⚠️ Cidades com múltiplos códigos ID encontrados: {dups.index.tolist()}")
-            st.dataframe(df_filtrado[
-                df_filtrado["Nome_Município"].astype(str).str.strip().str.upper().isin(dups.index)
-            ][["Nome_Município", "Código Município Completo"]].drop_duplicates())
-        else:
-            st.success("✅ Nenhum conflito de ID de município encontrado.")
-
-#----------------------------------------------------#
-
-
-# -------------------------------------------------------------------
-# Dados Detalhados e Exportação
-# -------------------------------------------------------------------
-st.markdown("---")
-st.subheader("Dados Detalhados")
-
-# Mostra dataframe filtrado
-# Mostra dataframe filtrado (removendo colunas de índice/unnamed se existirem)
-cols_to_show = [c for c in df_filtrado.columns if "Unnamed" not in c]
-
-st.dataframe(
-    df_filtrado[cols_to_show], 
-    use_container_width=True,
-    hide_index=True, # Garante que o índice numérico do pandas também não apareça
-    column_config={
-        "TAXA_CONCLUSAO": st.column_config.NumberColumn(
-            "Taxa Conclusão (%)",
-            format="%.2f %%"
+    with col_grafico2:
+        # Gráfico de barras dos 10 cursos com mais turmas
+        st.markdown(
+            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "Top 10 Cursos por Número de Turmas"
+            "</h4>",
+            unsafe_allow_html=True,
         )
-    }
-)
-
-# Botão de download
-@st.cache_data
-def convert_df(df):
-    return df.to_csv(index=False, sep=";").encode('utf-8')
-
-csv = convert_df(df_filtrado)
-
-st.download_button(
-    label="📥 Baixar Dados Filtrados (CSV)",
-    data=csv,
-    file_name='dados_qualificacao_filtrados.csv',
-    mime='text/csv',
-    key='download-csv'
-)
-
+        top_cursos = (
+            df_filtrado.groupby("CURSO")
+            .agg(total_turmas=pd.NamedAgg(column="CURSO", aggfunc="count"))
+            .reset_index()
+            .sort_values("total_turmas", ascending=False)
+            .head(10)
+        )
+        chart2 = (
+            alt.Chart(top_cursos)
+            .mark_bar()
+            .encode(
+                x=alt.X("total_turmas:Q", title="Número de Turmas"),
+                y=alt.Y("CURSO:N", sort="-x", title="Curso"),
+                tooltip=["CURSO", "total_turmas"]
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(chart2, use_container_width=True)
+        
+        
+        
+    col_grafico3, col_grafico4 = st.columns(2)
     
+    with col_grafico3:
+        # Gráfico de barras dos 10 municípios com mais concludentes
+        st.markdown(
+            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "Top 10 Concludentes por Executora"
+            "</h4>",
+            unsafe_allow_html=True,
+        )
+        top_exec = (
+            df_metrics_exec.sort_values("total_concludentes", ascending=False)
+            .head(10)
+        )
+    
+        chart3 = (
+            alt.Chart(top_exec)
+            .mark_bar()
+            .encode(
+                x=alt.X("total_concludentes:Q", title="Concludentes"),
+                y=alt.Y("EXECUTORA:N", sort="-x", title="Executora"),
+                tooltip=["EXECUTORA", "total_concludentes"]
+            )
+            .properties(height=300)
+        )
+    
+        st.altair_chart(chart3, use_container_width=True)
+        
+    with col_grafico4:
+        # Gráfico de barras dos 10 cursos com mais turmas
+        st.markdown(
+            "<h4 style='color:#6c91c8; font-weight:500; margin:0'>"
+            "Top 10 Turmas por Executora"
+            "</h4>",
+            unsafe_allow_html=True,
+        )
+        top_cursos = (
+            df_filtrado.groupby("EXECUTORA")['CURSO'].count()
+            .reset_index()
+            .sort_values("CURSO", ascending=False)
+        )
+        chart4 = (
+            alt.Chart(top_cursos)
+            .mark_bar()
+            .encode(
+                x=alt.X("CURSO:Q", title="Número de Turmas"),
+                y=alt.Y("EXECUTORA:N", sort="-x", title="Executora"),
+                tooltip=["EXECUTORA", "CURSO"]
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(chart4, use_container_width=True)
+        
+    # -------------------------------------------------------------------
+    # Diagnóstico de Qualidade dos Dados
+    # -------------------------------------------------------------------
+    with st.expander("⚠️ Diagnóstico de Qualidade dos Dados (Clique para ver)", expanded=False):
+        st.markdown("Verificação automática de inconsistências nos dados carregados.")
+        
+        # 1. Checagem de Concludentes > Inscritos
+        inconsistent_rows = df_filtrado[df_filtrado["CONCLUDENTES"] > df_filtrado["INSCRITOS"]]
+        if not inconsistent_rows.empty:
+            st.error(f"Foram encontradas {len(inconsistent_rows)} turmas com mais Concludentes do que Inscritos.")
+            st.markdown("**Aviso:** *Os indicadores acima exibem os valores reais inseridos na planilha, conforme solicitado, permitindo identificar inconsistências nos dados originais.*")
+            st.dataframe(
+                inconsistent_rows[["CURSO", "Nome_Município", "INSCRITOS", "CONCLUDENTES", "TAXA_CONCLUSAO"]],
+                use_container_width=True
+            )
+        else:
+            st.success("✅ Nenhuma inconsistência de 'Concludentes > Inscritos' encontrada no filtro atual.")
+    
+        # 2. Checagem de Múltiplos IDs para mesma cidade
+        df_debug = df_filtrado[["Nome_Município", "Código Município Completo"]].copy()
+        if "Nome_Município" in df_debug.columns:
+            df_debug["Nome_Município"] = df_debug["Nome_Município"].astype(str).str.strip().str.upper()
+            check_dups = df_debug.groupby("Nome_Município")["Código Município Completo"].nunique()
+            dups = check_dups[check_dups > 1]
+            
+            if not dups.empty:
+                st.warning(f"⚠️ Cidades com múltiplos códigos ID encontrados: {dups.index.tolist()}")
+                st.dataframe(df_filtrado[
+                    df_filtrado["Nome_Município"].astype(str).str.strip().str.upper().isin(dups.index)
+                ][["Nome_Município", "Código Município Completo"]].drop_duplicates())
+            else:
+                st.success("✅ Nenhum conflito de ID de município encontrado.")
+    
+    #----------------------------------------------------#
+    
+    
+    # -------------------------------------------------------------------
+    # Dados Detalhados e Exportação
+    # -------------------------------------------------------------------
+    st.markdown("---")
+    st.subheader("Dados Detalhados")
+    
+    # Mostra dataframe filtrado
+    # Mostra dataframe filtrado (removendo colunas de índice/unnamed se existirem)
+    cols_to_show = [c for c in df_filtrado.columns if "Unnamed" not in c]
+    
+    st.dataframe(
+        df_filtrado[cols_to_show], 
+        use_container_width=True,
+        hide_index=True, # Garante que o índice numérico do pandas também não apareça
+        column_config={
+            "TAXA_CONCLUSAO": st.column_config.NumberColumn(
+                "Taxa Conclusão (%)",
+                format="%.2f %%"
+            )
+        }
+    )
+    
+    # Botão de download
+    @st.cache_data
+    def convert_df(df):
+        return df.to_csv(index=False, sep=";").encode('utf-8')
+    
+    csv = convert_df(df_filtrado)
+    
+    st.download_button(
+        label="📥 Baixar Dados Filtrados (CSV)",
+        data=csv,
+        file_name='dados_qualificacao_filtrados.csv',
+        mime='text/csv',
+        key='download-csv'
+    )
+    
+        
+    
+    
+    #----------------------------------------------------#
 
+with tab2:
+    st.markdown("## Jornada do Empreendedor")
+    st.markdown("Acompanhamento das etapas de Pós-Qualificação: **Sensibilização**, **Trilha Empreendedora** e **Mentoria**.")
 
-#----------------------------------------------------#
+    # 1. Carregar Dados
+    df_trilha, df_mentoria = load_jornada_data()
+
+    if df_trilha.empty and df_mentoria.empty:
+        st.info("Nenhum dado de Jornada disponível no momento.")
+    else:
+        # --- Filtros (Aplicando o filtro global de Município se houver) ---
+        # Normalização básica para garantir o match
+        if selected_municipios:
+            # Filtrar Trilha
+            if "CIDADE" in df_trilha.columns:
+                 df_trilha = df_trilha[df_trilha["CIDADE"].isin(selected_municipios)]
+            
+            # Filtrar Mentoria
+            if "MUNICÍPIO" in df_mentoria.columns:
+                 df_mentoria = df_mentoria[df_mentoria["MUNICÍPIO"].isin(selected_municipios)]
+
+        # --- KPIs ---
+        # Trilha
+        kpi_sensib = df_trilha["PESSOAS SENSIBILIZAÇÃO"].sum() if "PESSOAS SENSIBILIZAÇÃO" in df_trilha.columns else 0
+        kpi_inscritos = df_trilha["INSCRITOS TRILHA"].sum() if "INSCRITOS TRILHA" in df_trilha.columns else 0
+        kpi_concluintes_trilha = df_trilha["CONCLUDENTES TRILHA"].sum() if "CONCLUDENTES TRILHA" in df_trilha.columns else 0
+        
+        # Mentoria (Contagem de linhas com Status 'Concluído')
+        kpi_mentorados = 0
+        if "STATUS" in df_mentoria.columns:
+             # Normaliza status para comparação
+             kpi_mentorados = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"].shape[0]
+
+        # Exibir KPIs
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Sensibilizados", f"{int(kpi_sensib)}")
+        col2.metric("Inscritos na Trilha", f"{int(kpi_inscritos)}")
+        col3.metric("Concluintes Trilha", f"{int(kpi_concluintes_trilha)}")
+        col4.metric("Mentorias Concluídas", f"{int(kpi_mentorados)}")
+        
+        st.divider()
+        
+        # --- Gráfico de Funil ---
+        st.subheader("Funil de Conversão")
+        
+        # Dados do funil
+        funnel_data = pd.DataFrame({
+            "Etapa": ["Sensibilização", "Inscrição Trilha", "Conclusão Trilha", "Mentoria Concluída"],
+            "Quantidade": [kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados]
+        })
+        
+        # Criação do gráfico
+        fig_funnel = px.funnel(funnel_data, x='Quantidade', y='Etapa', color='Etapa',
+                               color_discrete_sequence=px.colors.qualitative.Pastel)
+        fig_funnel.update_layout(showlegend=False)
+        st.plotly_chart(fig_funnel, use_container_width=True)
+        
+        st.divider()
+        
+        # --- Mapa de Densidade Empreendedora ---
+        st.subheader("Distribuição Geográfica")
+        
+        # Agregação por Município
+        # Trilha
+        if "CIDADE" in df_trilha.columns:
+            agg_trilha = df_trilha.groupby("CIDADE")["CONCLUDENTES TRILHA"].sum().reset_index()
+            agg_trilha.rename(columns={"CIDADE": "NM_MUN", "CONCLUDENTES TRILHA": "qtd_trilha"}, inplace=True)
+        else:
+            agg_trilha = pd.DataFrame(columns=["NM_MUN", "qtd_trilha"])
+            
+        # Mentoria
+        if "MUNICÍPIO" in df_mentoria.columns:
+            df_mentoria_concluidos = df_mentoria[df_mentoria["STATUS"].astype(str).str.strip().str.lower() == "concluído"]
+            agg_mentoria = df_mentoria_concluidos.groupby("MUNICÍPIO").size().reset_index(name="qtd_mentoria")
+            agg_mentoria.rename(columns={"MUNICÍPIO": "NM_MUN"}, inplace=True)
+        else:
+             agg_mentoria = pd.DataFrame(columns=["NM_MUN", "qtd_mentoria"])
+             
+        # Merge
+        df_mapa = pd.merge(agg_trilha, agg_mentoria, on="NM_MUN", how="outer").fillna(0)
+        df_mapa["total_empreend"] = df_mapa["qtd_trilha"] + df_mapa["qtd_mentoria"]
+        
+        # Preparar GeoJSON (Merge com Geometrias)
+        gdf_base = get_base_geodataframe(municipios_com_qualificacao) # Access cached function
+        
+        # Normalização de nomes para o merge no mapa
+        df_mapa["NM_MUN_UPPER"] = df_mapa["NM_MUN"].astype(str).str.upper().str.strip()
+        gdf_base["NM_MUN_UPPER"] = gdf_base["NM_MUN"].astype(str).str.upper().str.strip()
+        
+        # Merge Geometry
+        # Remover colunas conflitantes do gdf_base se houver
+        cols_drop_gdf = ["total_turmas", "total_concludentes", "qtd_trilha", "qtd_mentoria", "total_empreend"]
+        gdf_base_clean = gdf_base.drop(columns=[c for c in cols_drop_gdf if c in gdf_base.columns], errors='ignore')
+        
+        # Drop NM_MUN from right side (df_mapa) to avoid suffixes (_x, _y) on the preserved NM_MUN from gdf_base
+        df_mapa_clean = df_mapa.drop(columns=["NM_MUN"])
+        
+        gdf_jornada = gdf_base_clean.merge(df_mapa_clean, on="NM_MUN_UPPER", how="left").fillna(0)
+        
+        # Renderizar Mapa com Folium
+        m_jornada = folium.Map(location=[-5.3159, -39.2129], zoom_start=7)
+        
+        # Choropleth
+        chlor = folium.Choropleth(
+            geo_data=json.loads(gdf_jornada.to_json()),
+            data=df_mapa,
+            columns=["NM_MUN_UPPER", "total_empreend"],
+            key_on="feature.properties.NM_MUN_UPPER",
+            fill_color="YlOrRd",
+            fill_opacity=0.7,
+            line_opacity=0.2,
+            legend_name="Total Concluintes (Trilha + Mentoria)",
+            highlight=True
+        ).add_to(m_jornada)
+        
+        # Tooltip
+        folium.GeoJson(
+            json.loads(gdf_jornada.to_json()),
+            style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'}, # Invisível, só para tooltip
+            tooltip=folium.GeoJsonTooltip(
+                fields=["NM_MUN", "qtd_trilha", "qtd_mentoria", "total_empreend"],
+                aliases=["Município:", "Trilha:", "Mentoria:", "Total:"],
+                localize=True
+            )
+        ).add_to(m_jornada)
+        
+        st_folium(m_jornada, width=700, height=500, key="mapa_jornada")
+        
+        # --- Tabela Resumo ---
+        st.subheader("Resumo por Município")
+        st.dataframe(
+            df_mapa[["NM_MUN", "qtd_trilha", "qtd_mentoria", "total_empreend"]]
+            .sort_values("total_empreend", ascending=False)
+            .rename(columns={
+                "NM_MUN": "Município", 
+                "qtd_trilha": "Concluintes Trilha", 
+                "qtd_mentoria": "Mentorias Concluídas", 
+                "total_empreend": "Total Geral"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
