@@ -18,6 +18,7 @@ import urllib.parse as up # Import necessario para urlencode
 
 # Configuração para evitar FutureWarnings do Pandas (Downcasting)
 pd.set_option('future.no_silent_downcasting', True)
+from ml_utils import gerar_clusters_municipios
 
 @st.cache_data
 def load_jornada_data():
@@ -54,6 +55,7 @@ from merge_id_plataforma import merge_id_plataforma
 import acesso_planilha
 from acesso_planilha import carregar_google_sheet_aba
 from google_sheets_api import carregar_google_sheet_por_aba
+from tratamento_compilado import tratamento_compilado
 
 link = "https://docs.google.com/spreadsheets/d/1M2huy5RGW5D28zWRnBiHI4kSGWZNi5ejyygnxQjx7uo/edit?gid=0#gid=0"
 
@@ -110,29 +112,46 @@ st.markdown("""
 #-------------- Carregamento dos dados --------------#
 @st.cache_data
 def load_data():
-    # Carregar dados dos cursos
-    cursos_df = pd.read_csv(
-        "data2/compilado_novos_lotes_merge_nomes_cozinhas_05122025.csv",
+    """
+    Carrega e processa todos os dados necessários para a aplicação.
+    
+    Returns:
+        tuple: (cursos_df, qtd_beneficiarios_cozinhas_df, qtd_cozinhas_df, df_kitchen)
+    """
+    # Carregar dados brutos do Google Sheets (df_compilado)
+    # Nota: 'df' já foi carregado globalmente na linha 65
+    df_compilado = df.copy()
+    
+    # Carregar df_lotes (planilha de referência dos municípios)
+    df_lotes = pd.read_csv(
+        "data2/planilha de referência dos municipios com codigo do ibge - planilha de referência dos municipios com codigo do ibge.csv",
         encoding="utf-8",
-        sep=";",
-        # dtype={"Nº LOTE": "string", "Município": "string"},
+        sep=",",
     )
     
-    # carregar dados quantidade de beneficiários e cozinhas por lote, região e município
+    # Carregar df_kitchen
+    df_kitchen = pd.read_csv(
+        "data2/data-1762178638816_kitchen.csv"
+    )
+    
+    # Criar df_cozinhas_simp com apenas as colunas necessárias
+    df_cozinhas_simp = df_kitchen[['sda_id', 'name']].copy()
+    
+    # Processar os dados usando a função de tratamento
+    cursos_df = tratamento_compilado(df_compilado, df_lotes, df_cozinhas_simp)
+    
+    # Carregar dados quantidade de beneficiários e cozinhas por lote, região e município
     qtd_beneficiarios_cozinhas_df = pd.read_csv(
         "data2/quantidade_beneficiarios_e_cozinhas_lote_regiao_municipio_03112025.csv",
         encoding="utf-8",
         sep=",",
     )
-    # carregar dados de quantidade de cozinhas por lote, região e município
+    
+    # Carregar dados de quantidade de cozinhas por lote, região e município
     qtd_cozinhas_df = pd.read_csv(
         "data2/quantidade_beneficiarios_e_cozinhas_lote_regiao_municipio_03112025.csv",
         encoding="utf-8",
         sep=",",
-    )
-    
-    df_kitchen = pd.read_csv(
-        "data2/data-1762178638816_kitchen.csv"
     )
     
     return cursos_df, qtd_beneficiarios_cozinhas_df, qtd_cozinhas_df, df_kitchen
@@ -140,8 +159,40 @@ def load_data():
 
 cursos_df, qtd_beneficiarios_cozinhas_df, qtd_cozinhas_df, df_kitchen = load_data()
 
+# Substituir 'Certificado entregue' por 'Concluído'
+if "STATUS" in cursos_df.columns:
+    cursos_df["STATUS"] = cursos_df["STATUS"].astype(str).str.strip()
+    cursos_df.loc[cursos_df["STATUS"] == "Certificado entregue", "STATUS"] = "Concluído"
+
+# Substituir 'Maria da Hora' por 'Instituto Maria da Hora' na coluna EXECUTORA
+if "EXECUTORA" in cursos_df.columns:
+    cursos_df["EXECUTORA"] = cursos_df["EXECUTORA"].astype(str).str.strip()
+    cursos_df.loc[cursos_df["EXECUTORA"] == "Maria da Hora", "EXECUTORA"] = "Instituto Maria da Hora"
+
+# Normalizar colunas utilizadas nos filtros
+# Remove espaços extras, padroniza NaN e garante consistência
+if "Nome_Município" in cursos_df.columns:
+    cursos_df["Nome_Município"] = cursos_df["Nome_Município"].astype(str).str.strip()
+    cursos_df.loc[cursos_df["Nome_Município"] == "nan", "Nome_Município"] = None
+
+if "EXECUTORA" in cursos_df.columns:
+    # Já foi feito strip acima, mas garantir que não há "nan" como string
+    cursos_df.loc[cursos_df["EXECUTORA"] == "nan", "EXECUTORA"] = None
+
+if "CURSO" in cursos_df.columns:
+    cursos_df["CURSO"] = cursos_df["CURSO"].astype(str).str.strip()
+    cursos_df.loc[cursos_df["CURSO"] == "nan", "CURSO"] = None
+
+if "ÁREA DO CURSO\n(automático)" in cursos_df.columns:
+    cursos_df["ÁREA DO CURSO\n(automático)"] = (
+        cursos_df["ÁREA DO CURSO\n(automático)"]
+        .astype(str)
+        .str.strip()
+    )
+    cursos_df.loc[cursos_df["ÁREA DO CURSO\n(automático)"] == "nan", "ÁREA DO CURSO\n(automático)"] = None
+
 # Filtro de status indesejados solicitado pelo usuário
-status_indesejados = ["Turma Cancelada", "Não iniciado", "Certificado entregue", "Adiado"]
+status_indesejados = ["Turma Cancelada", "Não iniciado", "Adiado"]
 if "STATUS" in cursos_df.columns:
     # Remove espaços em branco extras para garantir o match
     cursos_df["STATUS"] = cursos_df["STATUS"].astype(str).str.strip()
@@ -355,25 +406,52 @@ sel_taxa_prev  = st.session_state.get("f_taxa", (0, 100))
 # Para cada widget, filtramos pelos OUTROS critérios, mas ignoramos a seleção DO PRÓPRIO widget.
 # Isso evita que as opções desapareçam ao selecionar um item.
 
-# Opções de Municípios (respeita exec, curso, area, taxa; ignora mun)
-df_mun_ops = filtrar_dados(base_df, [], sel_exec_prev, sel_curso_prev, sel_area_prev, sel_taxa_prev)
-mun_options = sorted(df_mun_ops["Nome_Município"].dropna().unique().tolist())
+# Verifica se TODOS os filtros estão vazios (estado inicial)
+todos_vazios = (
+    not sel_mun_prev and 
+    not sel_exec_prev and 
+    not sel_curso_prev and 
+    not sel_area_prev and 
+    sel_taxa_prev == (0, 100)
+)
 
-# Opções de Executoras (respeita mun, curso, area, taxa; ignora exec)
-df_exec_ops = filtrar_dados(base_df, sel_mun_prev, [], sel_curso_prev, sel_area_prev, sel_taxa_prev)
-exec_options = sorted(df_exec_ops["EXECUTORA"].dropna().unique().tolist())
-
-# Opções de Cursos (respeita mun, exec, area, taxa; ignora curso)
-df_curso_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, [], sel_area_prev, sel_taxa_prev)
-curso_options = sorted(df_curso_ops["CURSO"].dropna().unique().tolist())
-
-# Opções de Áreas (respeita mun, exec, curso, taxa; ignora area)
-df_area_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, [], sel_taxa_prev)
-area_options = sorted(df_area_ops[col_area].dropna().unique().tolist())
+# Se todos estão vazios, usa base_df diretamente (evita dependências circulares)
+if todos_vazios:
+    mun_options = sorted(base_df["Nome_Município"].dropna().unique().tolist())
+    exec_options = sorted(base_df["EXECUTORA"].dropna().unique().tolist())
+    curso_options = sorted(base_df["CURSO"].dropna().unique().tolist())
+    area_options = sorted(base_df[col_area].dropna().unique().tolist())
+else:
+    # Opções de Municípios (respeita exec, curso, area, taxa; ignora mun)
+    df_mun_ops = filtrar_dados(base_df, [], sel_exec_prev, sel_curso_prev, sel_area_prev, sel_taxa_prev)
+    mun_options = sorted(df_mun_ops["Nome_Município"].dropna().unique().tolist())
+    
+    # Opções de Executoras (respeita mun, curso, area, taxa; ignora exec)
+    df_exec_ops = filtrar_dados(base_df, sel_mun_prev, [], sel_curso_prev, sel_area_prev, sel_taxa_prev)
+    exec_options = sorted(df_exec_ops["EXECUTORA"].dropna().unique().tolist())
+    
+    # Opções de Cursos (respeita mun, exec, area, taxa; ignora curso)
+    df_curso_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, [], sel_area_prev, sel_taxa_prev)
+    curso_options = sorted(df_curso_ops["CURSO"].dropna().unique().tolist())
+    
+    # Opções de Áreas (respeita mun, exec, curso, taxa; ignora area)
+    df_area_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, [], sel_taxa_prev)
+    area_options = sorted(df_area_ops[col_area].dropna().unique().tolist())
 
 #-------------- Layout do Streamlit --------------#
 st.sidebar.image('icons/neg_color.png', use_container_width=True)
 st.sidebar.header("Filtros de Análise")
+
+# Botão para limpar todos os filtros
+if st.sidebar.button("🔄 Limpar Todos os Filtros", use_container_width=True):
+    # Reseta todas as chaves de filtro no session state
+    for key in ["f_mun", "f_exec", "f_curso", "f_area", "f_taxa"]:
+        if key in st.session_state:
+            if key == "f_taxa":
+                st.session_state[key] = (0, 100)
+            else:
+                st.session_state[key] = []
+    st.rerun()
 
 # 4) Widgets usando essas opções + default mantendo seleções válidas
 
@@ -426,6 +504,11 @@ algum_filtro_ativo = any([
 ])
 
 # 6) Aplica as seleções ATUAIS a toda a base para montar df_filtrado
+
+
+st.sidebar.markdown("---")
+usar_ia = st.sidebar.checkbox("🧠 Análise de Inteligência Artificial", value=False, help="Ativa a clusterização automática de municípios baseada em desempenho.")
+    
 if algum_filtro_ativo:
     df_filtrado = filtrar_dados(
         base_df, 
@@ -748,6 +831,51 @@ with tab1:
         geo_data_filtrada,
         mun_filtrados,
     )
+
+    # ---------------- Lógica de Clusterização (IA) ---------------- #
+    dict_cluster_cores = {} # Para legendas ou mapa
+    
+    if usar_ia:
+        # Gera clusters com base no DF completo (Global) para manter perfis estáveis
+        df_clusters = gerar_clusters_municipios(base_df)
+        
+        if not df_clusters.empty:
+            # Merge clusters no GeoJSON existente
+            # O GeoJSON já está em 'municipios_choropleth_filtrado' (dict)
+            # Vamos iterar e adicionar as propriedades
+            
+            # Cria dicionário para busca rápida: CD_MUN -> {cluster_id, cluster_name}
+            dict_clusters = df_clusters.set_index("CD_MUN")[["cluster_id", "cluster_name"]].to_dict(orient="index")
+            
+            # Cores para os clusters (0 a 4, suporta até 5)
+            # Cores categóricas distintas
+            dict_cluster_cores = {
+                0: "#d95f02", # Laranja escuro
+                1: "#7570b3", # Roxo
+                2: "#e7298a", # Rosa choque
+                3: "#66a61e", # Verde
+                4: "#1b9e77"  # Turquesa
+            }
+            
+            # Mapeia cluster_id -> cluster_name para a legenda
+            dict_cluster_names = df_clusters.drop_duplicates(subset=["cluster_id"])[["cluster_id", "cluster_name"]].set_index("cluster_id")["cluster_name"].to_dict()
+            
+            for feat in municipios_choropleth_filtrado["features"]:
+                props = feat.get("properties", {})
+                cd_mun = props.get("CD_MUN")
+                
+                # Se não tiver CD_MUN no feature, tenta inferir ou pular
+                # O merge anterior já garantiu CD_MUN nas properties vindas do df_data
+                if cd_mun in dict_clusters:
+                    c_info = dict_clusters[cd_mun]
+                    feat["properties"]["cluster_id"] = int(c_info["cluster_id"])
+                    feat["properties"]["cluster_name"] = str(c_info["cluster_name"])
+                else:
+                    feat["properties"]["cluster_id"] = -1 # Sem cluster
+                    feat["properties"]["cluster_name"] = "Sem dados"
+
+            st.sidebar.info("ℹ️ Clusters gerados com base em Volume de Vagas e Taxa de Conclusão.")
+
     
     # Atualiza colormap dinamicamente baseado nos dados visíveis?
     # Ou mantemos estático 0-100? Melhor estático 0-100 para consistência visual.
@@ -849,7 +977,10 @@ with tab1:
             geojson_cozinhas_focais_filtrado,
             municipios_com_qualificacao_filtrado, 
             municipios_choropleth_filtrado, 
-            colormap_conclusao
+            colormap_conclusao,
+            usar_ia=False,
+            dict_cluster_cores=None,
+            dict_cluster_names=None
         ):
             
             # Elementos do mapa
@@ -917,36 +1048,79 @@ with tab1:
                 show=False,
             ).add_to(m)
     
-            def style_conclusao(feature):
-                # pega o percentual da propriedade; se não houver, usa 0
-                valor = feature["properties"].get("percentual_conclusao")
-                if valor is None:
+            if usar_ia and dict_cluster_cores:
+                 # Estilo baseado em Cluster
+                def style_cluster(feature):
+                    c_id = feature["properties"].get("cluster_id", -1)
+                    color = dict_cluster_cores.get(c_id, "#cccccc")
                     return {
-                        "fillColor": "#cccccc",   # cinza para sem dado
+                        "fillColor": color,
                         "color": "black",
                         "weight": 0.5,
-                        "fillOpacity": 0.4,
+                        "fillOpacity": 0.7,
                     }
-                return {
-                    "fillColor": colormap_conclusao(valor),
-                    "color": "black",
-                    "weight": 0.5,
-                    "fillOpacity": 0.7,
-                }
-    
-            folium.GeoJson(
-                municipios_choropleth_filtrado,
-                name="Percentual de conclusão",
-                style_function=style_conclusao,
-                tooltip=folium.GeoJsonTooltip(
+                
+                style_func = style_cluster
+                
+                # Tooltip adaptado para mostrar o Cluster
+                tooltip_obj = folium.GeoJsonTooltip(
+                    fields=["NM_MUN", "cluster_name", "percentual_conclusao"],
+                    aliases=["Município:", "Perfil (IA):", "Conclusão:"],
+                    localize=True,
+                )
+                
+            else:
+                 # Estilo original (Percentual)
+                def style_conclusao(feature):
+                    # pega o percentual da propriedade; se não houver, usa 0
+                    valor = feature["properties"].get("percentual_conclusao")
+                    if valor is None:
+                        return {
+                            "fillColor": "#cccccc",   # cinza para sem dado
+                            "color": "black",
+                            "weight": 0.5,
+                            "fillOpacity": 0.4,
+                        }
+                    return {
+                        "fillColor": colormap_conclusao(valor),
+                        "color": "black",
+                        "weight": 0.5,
+                        "fillOpacity": 0.7,
+                    }
+                style_func = style_conclusao
+                tooltip_obj = folium.GeoJsonTooltip(
                     fields=["NM_MUN", "percentual_conclusao"],
                     aliases=["Município:", "Percentual conclusão:"],
                     localize=True,
-                ),
+                )
+    
+            folium.GeoJson(
+                municipios_choropleth_filtrado,
+                name="Análise de Municípios" if usar_ia else "Percentual de conclusão",
+                style_function=style_func,
+                tooltip=tooltip_obj,
             ).add_to(choropleth_feature_group_indicadores)
     
-            # adiciona a legenda do colormap ao mapa
-            colormap_conclusao.add_to(m)
+            # adiciona a legenda (colormap ou manual)
+            if usar_ia and dict_cluster_cores:
+                # Legenda customizada html para clusters
+                legend_html = """
+                <div style="position: fixed; 
+                            bottom: 50px; left: 50px; width: 180px; height: auto; 
+                            border:2px solid grey; z-index:9999; font-size:12px;
+                            background-color:white; padding: 10px; border-radius: 5px; opacity: 0.9;">
+                  <b>Perfis de Municípios (IA)</b><br>
+                """
+                # Usa os nomes reais dos clusters vindos do ML
+                for cid, color in dict_cluster_cores.items():
+                    # Pega o nome real do cluster se disponível
+                    cluster_label = dict_cluster_names.get(cid, f"Cluster {cid}") if dict_cluster_names else f"Cluster {cid}"
+                    legend_html += f'<i style="background:{color};width:10px;height:10px;display:inline-block;border-radius:50%;"></i> {cluster_label}<br>'
+                    
+                legend_html += "</div>"
+                m.get_root().html.add_child(folium.Element(legend_html))
+            else:
+                colormap_conclusao.add_to(m)
     
             
     
@@ -1023,7 +1197,11 @@ with tab1:
             geojson_cozinhas_focais_filtrado=geojson_cozinhas_focais_filtrado,
             municipios_com_qualificacao_filtrado=municipios_com_qualificacao_filtrado,
             municipios_choropleth_filtrado=municipios_choropleth_filtrado,
-            colormap_conclusao=colormap_conclusao, 
+            # municipios_choropleth_filtrado=municipios_choropleth_filtrado,
+            colormap_conclusao=colormap_conclusao,
+            usar_ia=usar_ia,
+            dict_cluster_cores=dict_cluster_cores,
+            dict_cluster_names=dict_cluster_names if usar_ia else None
         )
     
     
@@ -1788,3 +1966,5 @@ with tab2:
                 )
             }
         )
+
+

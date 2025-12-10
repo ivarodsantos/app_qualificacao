@@ -109,5 +109,9 @@ def carregar_google_sheet_por_aba(
 
     # 7) Cria o DataFrame
     df = pd.DataFrame(rows, columns=header)
-
-    return df
+    
+    # Remove linhas onde CURSO é nulo, vazio ou apenas espaços
+    df_clean = df.dropna(subset=['CURSO'])  # Remove NaN
+    df_clean = df_clean[df_clean['CURSO'].str.strip() != '']  # Remove strings vazias/espaços
+    
+    return df_clean
