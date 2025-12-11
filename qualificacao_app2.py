@@ -671,6 +671,63 @@ with tab1:
         (concludentes_ajustados / total_geral_vagas) * 100, 2
     ) if total_geral_vagas > 0 else 0
     
+    # ============ EXPORTAR RELATÓRIO PDF ============
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📄 Exportar Relatório")
+    
+    # Botão para gerar PDF
+    if st.sidebar.button("📥 Gerar Relatório PDF", use_container_width=True):
+        try:
+            from gerar_relatorio_pdf import gerar_relatorio
+            
+            # Preparar KPIs
+            kpis = {
+                'total_turmas': total_geral_turmas,
+                'total_vagas': int(total_geral_vagas),
+                'total_inscritos': int(total_geral_inscritos),
+                'total_concludentes': int(total_geral_concludentes),
+                'taxa_conclusao': percentual_geral_conclusao
+            }
+            
+            # Preparar informações dos filtros
+            filtros_info = {}
+            if selected_municipios:
+                filtros_info['Municípios'] = selected_municipios
+            if selected_executoras:
+                filtros_info['Executoras'] = selected_executoras
+            if selected_cursos:
+                filtros_info['Cursos'] = selected_cursos
+            if selected_areas_qualificacao:
+                filtros_info['Áreas'] = selected_areas_qualificacao
+            if selected_taxa_range != (0, 100):
+                filtros_info['Taxa de Conclusão'] = f"{selected_taxa_range[0]}% - {selected_taxa_range[1]}%"
+            
+            # Gerar PDF
+            pdf_bytes = gerar_relatorio(df_filtrado, kpis, filtros_info)
+            
+            # Criar nome do arquivo com data/hora
+            from datetime import datetime
+            nome_arquivo = f"relatorio_csf_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            
+            # Botão de download
+            st.sidebar.download_button(
+                label="⬇️ Baixar PDF",
+                data=pdf_bytes,
+                file_name=nome_arquivo,
+                mime="application/pdf",
+                use_container_width=True
+            )
+            st.sidebar.success("✅ Relatório gerado com sucesso!")
+            
+        except ImportError as e:
+            st.sidebar.error("❌ Biblioteca fpdf2 não encontrada. Instale com: pip install fpdf2")
+        except Exception as e:
+            st.sidebar.error(f"❌ Erro ao gerar relatório: {str(e)}")
+    
+    st.sidebar.markdown("---")
+    
+    # ================================================
+    
     # Métricas de Status
     # Robustez para encoding: verificar startsWith ou contains se necessário, 
     # mas assumindo utf-8 correto:
@@ -1794,6 +1851,7 @@ def prepare_jornada_map_data(df_comparativo, _municipios_geojson_data):
     
     
     # Merge com dados comparativos
+    # Remover NM_MUN de df_comparativo para evitar duplicação (gdf_base já possui via linha 1846)
     df_comp_clean = df_comparativo.drop(columns=["NM_MUN"], errors='ignore')
     gdf_jornada = gdf_base_clean.merge(df_comp_clean, on="NM_MUN_UPPER", how="left").fillna(0)
     
@@ -1802,6 +1860,11 @@ def prepare_jornada_map_data(df_comparativo, _municipios_geojson_data):
         (gdf_jornada["NM_MUN_UPPER"] != "FORTALEZA") & 
         (gdf_jornada["qtd_mentoria"] > 0)
     ]
+    
+    # Garantir que NM_MUN existe no GeoJSON final (APÓS os filtros)
+    # Deve vir de gdf_base, mas criar se não existir para garantir tooltip funcione
+    if "NM_MUN" not in gdf_jornada.columns:
+        gdf_jornada["NM_MUN"] = gdf_jornada["NM_MUN_UPPER"].str.title()
     
     # Dados de Plotagem (Interior apenas e com Mentoria > 0)
     df_interior = df_comparativo[
@@ -1909,38 +1972,43 @@ with tab2:
             municipios_com_qualificacao
         )
         
-        # Fragmento do Mapa para evitar Reruns Globais
-        @st.fragment
-        def render_mapa_jornada(geojson, data_plot, bins):
-            m_jornada = folium.Map(location=[-5.3159, -39.2129], zoom_start=7)
-            
-            folium.Choropleth(
-                geo_data=geojson,
-                data=data_plot,
-                columns=["NM_MUN_UPPER", "qtd_mentoria"],
-                key_on="feature.properties.NM_MUN_UPPER",
-                fill_color="YlOrRd", 
-                fill_opacity=0.7,
-                line_opacity=0.2,
-                legend_name="Total Mentorias (Interior)",
-                threshold_scale=bins,
-                highlight=True
-            ).add_to(m_jornada)
-            
-            folium.GeoJson(
-                geojson,
-                style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'},
-                tooltip=folium.GeoJsonTooltip(
-                    fields=["NM_MUN", "qtd_qualificacao", "qtd_trilha", "qtd_mentoria"],
-                    aliases=["Município:", "Qualificados:", "Trilha:", "Mentorados:"],
-                    localize=True
-                )
-            ).add_to(m_jornada)
-            
-            st_folium(m_jornada, width=700, height=500, key="mapa_jornada_frag", returned_objects=["last_object_clicked"])
+        # Verificar se há dados para exibir no mapa
+        # (GeoJSON pode estar vazio se município filtrado não tem mentorias)
+        if not geojson_jornada or len(geojson_jornada.get('features', [])) == 0:
+            st.info("ℹ️ Nenhum município com mentorias concluídas para exibir no mapa. Os municípios selecionados podem não ter dados de mentoria registrados.")
+        else:
+            # Fragmento do Mapa para evitar Reruns Globais
+            @st.fragment
+            def render_mapa_jornada(geojson, data_plot, bins):
+                m_jornada = folium.Map(location=[-5.3159, -39.2129], zoom_start=7)
+                
+                folium.Choropleth(
+                    geo_data=geojson,
+                    data=data_plot,
+                    columns=["NM_MUN_UPPER", "qtd_mentoria"],
+                    key_on="feature.properties.NM_MUN_UPPER",
+                    fill_color="YlOrRd", 
+                    fill_opacity=0.7,
+                    line_opacity=0.2,
+                    legend_name="Total Mentorias (Interior)",
+                    threshold_scale=bins,
+                    highlight=True
+                ).add_to(m_jornada)
+                
+                folium.GeoJson(
+                    geojson,
+                    style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'},
+                    tooltip=folium.GeoJsonTooltip(
+                        fields=["NM_MUN", "qtd_qualificacao", "qtd_trilha", "qtd_mentoria"],
+                        aliases=["Município:", "Qualificados:", "Trilha:", "Mentorados:"],
+                        localize=True
+                    )
+                ).add_to(m_jornada)
+                
+                st_folium(m_jornada, width=700, height=500, key="mapa_jornada_frag", returned_objects=["last_object_clicked"])
 
-        # Chama o fragmento
-        render_mapa_jornada(geojson_jornada, df_interior_plot, bins_jornada)
+            # Chama o fragmento
+            render_mapa_jornada(geojson_jornada, df_interior_plot, bins_jornada)
         
         # --- Tabela ---
         st.subheader("Tabela de Efetividade")
