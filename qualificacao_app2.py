@@ -191,6 +191,10 @@ if "ÁREA DO CURSO\n(automático)" in cursos_df.columns:
     )
     cursos_df.loc[cursos_df["ÁREA DO CURSO\n(automático)"] == "nan", "ÁREA DO CURSO\n(automático)"] = None
 
+if "PROJETO" in cursos_df.columns:
+    cursos_df["PROJETO"] = cursos_df["PROJETO"].astype(str).str.strip()
+    cursos_df.loc[cursos_df["PROJETO"] == "nan", "PROJETO"] = None
+
 # Filtro de status indesejados solicitado pelo usuário
 status_indesejados = ["Turma Cancelada", "Não iniciado", "Adiado"]
 if "STATUS" in cursos_df.columns:
@@ -372,7 +376,7 @@ base_df = merged_df.copy()
 
 col_area = "ÁREA DO CURSO\n(automático)"
 
-def filtrar_dados(df, municipios, executoras, cursos, areas, taxa_range):
+def filtrar_dados(df, municipios, executoras, cursos, areas, projetos, taxa_range):
     """Filtra o DataFrame com base nas listas de opções selecionadas e range de taxa."""
     df_result = df.copy()
     if municipios:
@@ -383,6 +387,8 @@ def filtrar_dados(df, municipios, executoras, cursos, areas, taxa_range):
         df_result = df_result[df_result["CURSO"].isin(cursos)]
     if areas:
         df_result = df_result[df_result[col_area].isin(areas)]
+    if projetos:
+        df_result = df_result[df_result["PROJETO"].isin(projetos)]
     
     # Filtro por faixa de conclusão
     if taxa_range:
@@ -400,6 +406,7 @@ sel_mun_prev   = st.session_state.get("f_mun", [])
 sel_exec_prev  = st.session_state.get("f_exec", [])
 sel_curso_prev = st.session_state.get("f_curso", [])
 sel_area_prev  = st.session_state.get("f_area", [])
+sel_projeto_prev = st.session_state.get("f_projeto", [])
 sel_taxa_prev  = st.session_state.get("f_taxa", (0, 100))
 
 # 2) Montar df_opcoes "Context-Aware"
@@ -412,6 +419,7 @@ todos_vazios = (
     not sel_exec_prev and 
     not sel_curso_prev and 
     not sel_area_prev and 
+    not sel_projeto_prev and 
     sel_taxa_prev == (0, 100)
 )
 
@@ -421,22 +429,27 @@ if todos_vazios:
     exec_options = sorted(base_df["EXECUTORA"].dropna().unique().tolist())
     curso_options = sorted(base_df["CURSO"].dropna().unique().tolist())
     area_options = sorted(base_df[col_area].dropna().unique().tolist())
+    projeto_options = sorted(base_df["PROJETO"].dropna().unique().tolist())
 else:
-    # Opções de Municípios (respeita exec, curso, area, taxa; ignora mun)
-    df_mun_ops = filtrar_dados(base_df, [], sel_exec_prev, sel_curso_prev, sel_area_prev, sel_taxa_prev)
+    # Opções de Municípios (respeita exec, curso, area, projeto, taxa; ignora mun)
+    df_mun_ops = filtrar_dados(base_df, [], sel_exec_prev, sel_curso_prev, sel_area_prev, sel_projeto_prev, sel_taxa_prev)
     mun_options = sorted(df_mun_ops["Nome_Município"].dropna().unique().tolist())
     
-    # Opções de Executoras (respeita mun, curso, area, taxa; ignora exec)
-    df_exec_ops = filtrar_dados(base_df, sel_mun_prev, [], sel_curso_prev, sel_area_prev, sel_taxa_prev)
+    # Opções de Executoras (respeita mun, curso, area, projeto, taxa; ignora exec)
+    df_exec_ops = filtrar_dados(base_df, sel_mun_prev, [], sel_curso_prev, sel_area_prev, sel_projeto_prev, sel_taxa_prev)
     exec_options = sorted(df_exec_ops["EXECUTORA"].dropna().unique().tolist())
     
-    # Opções de Cursos (respeita mun, exec, area, taxa; ignora curso)
-    df_curso_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, [], sel_area_prev, sel_taxa_prev)
+    # Opções de Cursos (respeita mun, exec, area, projeto, taxa; ignora curso)
+    df_curso_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, [], sel_area_prev, sel_projeto_prev, sel_taxa_prev)
     curso_options = sorted(df_curso_ops["CURSO"].dropna().unique().tolist())
     
-    # Opções de Áreas (respeita mun, exec, curso, taxa; ignora area)
-    df_area_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, [], sel_taxa_prev)
+    # Opções de Áreas (respeita mun, exec, curso, projeto, taxa; ignora area)
+    df_area_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, [], sel_projeto_prev, sel_taxa_prev)
     area_options = sorted(df_area_ops[col_area].dropna().unique().tolist())
+    
+    # Opções de Projetos (respeita mun, exec, curso, area, taxa; ignora projeto)
+    df_projeto_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, sel_area_prev, [], sel_taxa_prev)
+    projeto_options = sorted(df_projeto_ops["PROJETO"].dropna().unique().tolist())
 
 #-------------- Layout do Streamlit --------------#
 st.sidebar.image('icons/neg_color.png', use_container_width=True)
@@ -445,7 +458,7 @@ st.sidebar.header("Filtros de Análise")
 # Botão para limpar todos os filtros
 if st.sidebar.button("🔄 Limpar Todos os Filtros", use_container_width=True):
     # Reseta todas as chaves de filtro no session state
-    for key in ["f_mun", "f_exec", "f_curso", "f_area", "f_taxa"]:
+    for key in ["f_mun", "f_exec", "f_curso", "f_area", "f_projeto", "f_taxa"]:
         if key in st.session_state:
             if key == "f_taxa":
                 st.session_state[key] = (0, 100)
@@ -484,6 +497,13 @@ selected_areas_qualificacao = st.sidebar.multiselect(
     key="f_area",
 )
 
+selected_projetos = st.sidebar.multiselect(
+    "Selecione os projetos:",
+    options=projeto_options,
+    default=[v for v in sel_projeto_prev if v in projeto_options],
+    key="f_projeto",
+)
+
 # Slider de Taxa de Conclusão
 st.sidebar.markdown("<br/>", unsafe_allow_html=True)
 selected_taxa_range = st.sidebar.slider(
@@ -500,6 +520,7 @@ algum_filtro_ativo = any([
     selected_executoras,
     selected_cursos,
     selected_areas_qualificacao,
+    selected_projetos,
     selected_taxa_range != (0, 100)
 ])
 
@@ -516,6 +537,7 @@ if algum_filtro_ativo:
         selected_executoras, 
         selected_cursos, 
         selected_areas_qualificacao,
+        selected_projetos,
         selected_taxa_range
     )
 else:
@@ -699,6 +721,8 @@ with tab1:
                 filtros_info['Cursos'] = selected_cursos
             if selected_areas_qualificacao:
                 filtros_info['Áreas'] = selected_areas_qualificacao
+            if selected_projetos:
+                filtros_info['Projetos'] = selected_projetos
             if selected_taxa_range != (0, 100):
                 filtros_info['Taxa de Conclusão'] = f"{selected_taxa_range[0]}% - {selected_taxa_range[1]}%"
             
