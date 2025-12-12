@@ -78,34 +78,39 @@ def load_css(file_name):
 # Carrega o CSS global
 load_css("styles.css")
 
+# Função para converter imagem para base64
+def get_base64_of_bin_file(bin_file):
+    try:
+        with open(bin_file, 'rb') as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except Exception as e:
+        return ""
+
+# Carregar imagens em base64
+img_gov_b64 = get_base64_of_bin_file("icons/govce_hor_neg.png")
+img_qualifica_b64 = get_base64_of_bin_file("icons/neg_fundo azul.png")
+
 # =============================================================================
 # HEADER INSTITUCIONAL (Baseado no Slide 1)
 # =============================================================================
-st.markdown("""
-<div style="background-color: var(--azul-gov); padding: 2rem; border-radius: 0 0 15px 15px; margin-bottom: 2rem; color: white;">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 300px;">
-            <p style="font-size: 1.2rem; font-weight: 500; margin:0; opacity: 0.9; color: #FFF;">PAINEL DE MONITORAMENTO</p>
-            <h1 style="color: #FFF !important; margin: 0; font-size: 3rem; line-height: 1.1;">
-                CEARÁ<br/>
-                SEM FOME
-            </h1>
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                <span style="font-size: 2.5rem; font-weight: 700; color: var(--amarelo-destaque);">+</span>
-                <span style="font-size: 2rem; font-weight: 600; color: var(--amarelo-destaque);">Qualificação e Renda</span>
+st.markdown(f"""
+<div style="background: linear-gradient(135deg, var(--azul-gov) 0%, #1a4b8c 100%); padding: 2.5rem 3rem; border-radius: 0 0 20px 20px; margin-bottom: 2rem; color: white; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+            <div style="font-family: 'Space Grotesk', sans-serif; font-size: 2.2rem; font-weight: 700; line-height: 1.1; letter-spacing: -0.5px; text-transform: uppercase; border-bottom: 4px solid var(--amarelo-destaque); padding-bottom: 8px; width: fit-content;">
+                Painel de Monitoramento
+            </div>
+            <div style="display: flex; align-items: center; gap: 15px; margin-top: 5px;">
+                 <img src="data:image/png;base64,{img_qualifica_b64}" style="max-height: 90px; width: auto; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));" alt="+ Qualificação e Renda">
             </div>
         </div>
-        <div style="text-align: right; min-width: 200px;">
-             <!-- Placeholder para logos se necessário, ou apenas texto institucional -->
-             <div style="border-left: 4px solid var(--amarelo-destaque); padding-left: 15px; color: white;">
-                <p style="margin:0; font-size: 0.9rem;">GOVERNO DO ESTADO DO</p>
-                <p style="margin:0; font-size: 1.5rem; font-weight: 800; letter-spacing: 1px;">CEARÁ</p>
-             </div>
+        <div style="display: flex; align-items: center; height: 100%; padding-left: 30px; border-left: 1px solid rgba(255, 255, 255, 0.2);">
+             <img src="data:image/png;base64,{img_gov_b64}" style="max-height: 70px; width: auto; opacity: 0.95;" alt="Governo do Ceará">
         </div>
     </div>
 </div>
-<!-- Divisor Colorido Institucional -->
-<div class="custom-divider"></div>
+<div class="custom-divider" style="margin-top: -1rem; margin-bottom: 2rem;"></div>
 """, unsafe_allow_html=True)
 
 
@@ -195,6 +200,10 @@ if "PROJETO" in cursos_df.columns:
     cursos_df["PROJETO"] = cursos_df["PROJETO"].astype(str).str.strip()
     cursos_df.loc[cursos_df["PROJETO"] == "nan", "PROJETO"] = None
 
+if "PARCEIRO" in cursos_df.columns:
+    cursos_df["PARCEIRO"] = cursos_df["PARCEIRO"].astype(str).str.strip().str.upper()
+    cursos_df.loc[cursos_df["PARCEIRO"] == "NAN", "PARCEIRO"] = None
+
 # Filtro de status indesejados solicitado pelo usuário
 status_indesejados = ["Turma Cancelada", "Não iniciado", "Adiado"]
 if "STATUS" in cursos_df.columns:
@@ -206,8 +215,8 @@ if "STATUS" in cursos_df.columns:
 
 geojsons = [
     "data/municipios_latlon.geojson",
-    "data2/cozinhas_geo_ipece_01122025.geojson",
-    "data2/municipios_com_qualificacao.geojson",
+    "data2/cozinhas_geo_ipece_01122025_simplificado.geojson",
+    "data2/municipios_com_qualificacao_simplificado.geojson",
 ]
 
 @st.cache_data
@@ -376,7 +385,8 @@ base_df = merged_df.copy()
 
 col_area = "ÁREA DO CURSO\n(automático)"
 
-def filtrar_dados(df, municipios, executoras, cursos, areas, projetos, taxa_range):
+@st.cache_data(show_spinner=False)
+def filtrar_dados(df, municipios, executoras, cursos, areas, projetos, parceiros, taxa_range):
     """Filtra o DataFrame com base nas listas de opções selecionadas e range de taxa."""
     df_result = df.copy()
     if municipios:
@@ -389,6 +399,8 @@ def filtrar_dados(df, municipios, executoras, cursos, areas, projetos, taxa_rang
         df_result = df_result[df_result[col_area].isin(areas)]
     if projetos:
         df_result = df_result[df_result["PROJETO"].isin(projetos)]
+    if parceiros:
+        df_result = df_result[df_result["PARCEIRO"].isin(parceiros)]
     
     # Filtro por faixa de conclusão
     if taxa_range:
@@ -407,6 +419,7 @@ sel_exec_prev  = st.session_state.get("f_exec", [])
 sel_curso_prev = st.session_state.get("f_curso", [])
 sel_area_prev  = st.session_state.get("f_area", [])
 sel_projeto_prev = st.session_state.get("f_projeto", [])
+sel_parceiro_prev = st.session_state.get("f_parceiro", [])
 sel_taxa_prev  = st.session_state.get("f_taxa", (0, 100))
 
 # 2) Montar df_opcoes "Context-Aware"
@@ -420,6 +433,7 @@ todos_vazios = (
     not sel_curso_prev and 
     not sel_area_prev and 
     not sel_projeto_prev and 
+    not sel_parceiro_prev and 
     sel_taxa_prev == (0, 100)
 )
 
@@ -430,26 +444,31 @@ if todos_vazios:
     curso_options = sorted(base_df["CURSO"].dropna().unique().tolist())
     area_options = sorted(base_df[col_area].dropna().unique().tolist())
     projeto_options = sorted(base_df["PROJETO"].dropna().unique().tolist())
+    parceiro_options = sorted(base_df["PARCEIRO"].dropna().unique().tolist())
 else:
-    # Opções de Municípios (respeita exec, curso, area, projeto, taxa; ignora mun)
-    df_mun_ops = filtrar_dados(base_df, [], sel_exec_prev, sel_curso_prev, sel_area_prev, sel_projeto_prev, sel_taxa_prev)
+    # Opções de Municípios (respeita exec, curso, area, projeto, parceiro, taxa; ignora mun)
+    df_mun_ops = filtrar_dados(base_df, [], sel_exec_prev, sel_curso_prev, sel_area_prev, sel_projeto_prev, sel_parceiro_prev, sel_taxa_prev)
     mun_options = sorted(df_mun_ops["Nome_Município"].dropna().unique().tolist())
     
-    # Opções de Executoras (respeita mun, curso, area, projeto, taxa; ignora exec)
-    df_exec_ops = filtrar_dados(base_df, sel_mun_prev, [], sel_curso_prev, sel_area_prev, sel_projeto_prev, sel_taxa_prev)
+    # Opções de Executoras (respeita mun, curso, area, projeto, parceiro, taxa; ignora exec)
+    df_exec_ops = filtrar_dados(base_df, sel_mun_prev, [], sel_curso_prev, sel_area_prev, sel_projeto_prev, sel_parceiro_prev, sel_taxa_prev)
     exec_options = sorted(df_exec_ops["EXECUTORA"].dropna().unique().tolist())
     
-    # Opções de Cursos (respeita mun, exec, area, projeto, taxa; ignora curso)
-    df_curso_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, [], sel_area_prev, sel_projeto_prev, sel_taxa_prev)
+    # Opções de Cursos (respeita mun, exec, area, projeto, parceiro, taxa; ignora curso)
+    df_curso_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, [], sel_area_prev, sel_projeto_prev, sel_parceiro_prev, sel_taxa_prev)
     curso_options = sorted(df_curso_ops["CURSO"].dropna().unique().tolist())
     
-    # Opções de Áreas (respeita mun, exec, curso, projeto, taxa; ignora area)
-    df_area_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, [], sel_projeto_prev, sel_taxa_prev)
+    # Opções de Áreas (respeita mun, exec, curso, projeto, parceiro, taxa; ignora area)
+    df_area_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, [], sel_projeto_prev, sel_parceiro_prev, sel_taxa_prev)
     area_options = sorted(df_area_ops[col_area].dropna().unique().tolist())
     
-    # Opções de Projetos (respeita mun, exec, curso, area, taxa; ignora projeto)
-    df_projeto_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, sel_area_prev, [], sel_taxa_prev)
+    # Opções de Projetos (respeita mun, exec, curso, area, parceiro, taxa; ignora projeto)
+    df_projeto_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, sel_area_prev, [], sel_parceiro_prev, sel_taxa_prev)
     projeto_options = sorted(df_projeto_ops["PROJETO"].dropna().unique().tolist())
+    
+    # Opções de Parceiros (respeita mun, exec, curso, area, projeto, taxa; ignora parceiro)
+    df_parceiro_ops = filtrar_dados(base_df, sel_mun_prev, sel_exec_prev, sel_curso_prev, sel_area_prev, sel_projeto_prev, [], sel_taxa_prev)
+    parceiro_options = sorted(df_parceiro_ops["PARCEIRO"].dropna().unique().tolist())
 
 #-------------- Layout do Streamlit --------------#
 st.sidebar.image('icons/neg_color.png', use_container_width=True)
@@ -458,13 +477,21 @@ st.sidebar.header("Filtros de Análise")
 # Botão para limpar todos os filtros
 if st.sidebar.button("🔄 Limpar Todos os Filtros", use_container_width=True):
     # Reseta todas as chaves de filtro no session state
-    for key in ["f_mun", "f_exec", "f_curso", "f_area", "f_projeto", "f_taxa"]:
+    for key in ["f_mun", "f_exec", "f_curso", "f_area", "f_projeto", "f_parceiro", "f_taxa"]:
         if key in st.session_state:
             if key == "f_taxa":
                 st.session_state[key] = (0, 100)
             else:
                 st.session_state[key] = []
     st.rerun()
+
+# Botão para forçar refresh dos dados (limpar cache)
+if st.sidebar.button("🔄 Atualizar Dados", use_container_width=True, help="Limpa o cache e recarrega os dados do Google Sheets"):
+    st.cache_data.clear()
+    st.success("✅ Cache limpo! Recarregando dados...")
+    st.rerun()
+
+st.sidebar.markdown("---")
 
 # 4) Widgets usando essas opções + default mantendo seleções válidas
 
@@ -504,6 +531,13 @@ selected_projetos = st.sidebar.multiselect(
     key="f_projeto",
 )
 
+selected_parceiros = st.sidebar.multiselect(
+    "Selecione os parceiros:",
+    options=parceiro_options,
+    default=[v for v in sel_parceiro_prev if v in parceiro_options],
+    key="f_parceiro",
+)
+
 # Slider de Taxa de Conclusão
 st.sidebar.markdown("<br/>", unsafe_allow_html=True)
 selected_taxa_range = st.sidebar.slider(
@@ -521,6 +555,7 @@ algum_filtro_ativo = any([
     selected_cursos,
     selected_areas_qualificacao,
     selected_projetos,
+    selected_parceiros,
     selected_taxa_range != (0, 100)
 ])
 
@@ -538,6 +573,7 @@ if algum_filtro_ativo:
         selected_cursos, 
         selected_areas_qualificacao,
         selected_projetos,
+        selected_parceiros,
         selected_taxa_range
     )
 else:
@@ -702,13 +738,27 @@ with tab1:
         try:
             from gerar_relatorio_pdf import gerar_relatorio
             
-            # Preparar KPIs
+            # Calcular taxa de desistência (sem usar INSCRITOS)
+            taxa_desistencia = round(
+                (total_geral_desistentes / total_geral_vagas) * 100, 2
+            ) if total_geral_vagas > 0 else 0
+            
+            # Preparar KPIs estendidos (sem INSCRITOS conforme solicitado)
             kpis = {
                 'total_turmas': total_geral_turmas,
                 'total_vagas': int(total_geral_vagas),
-                'total_inscritos': int(total_geral_inscritos),
                 'total_concludentes': int(total_geral_concludentes),
-                'taxa_conclusao': percentual_geral_conclusao
+                'total_desistentes': int(total_geral_desistentes),
+                'taxa_conclusao': percentual_geral_conclusao,
+                'taxa_desistencia': taxa_desistencia
+            }
+            
+            # Preparar informações de status operacional
+            status_info = {
+                'em_execucao': turmas_em_execucao if 'turmas_em_execucao' in dir() else 0,
+                'concluidas': turmas_concluidas if 'turmas_concluidas' in dir() else 0,
+                'num_municipios': df_filtrado['Nome_Município'].nunique() if 'Nome_Município' in df_filtrado.columns else 0,
+                'num_executoras': df_filtrado['EXECUTORA'].nunique() if 'EXECUTORA' in df_filtrado.columns else 0
             }
             
             # Preparar informações dos filtros
@@ -723,11 +773,33 @@ with tab1:
                 filtros_info['Áreas'] = selected_areas_qualificacao
             if selected_projetos:
                 filtros_info['Projetos'] = selected_projetos
+            if selected_parceiros:
+                filtros_info['Parceiros'] = selected_parceiros
             if selected_taxa_range != (0, 100):
                 filtros_info['Taxa de Conclusão'] = f"{selected_taxa_range[0]}% - {selected_taxa_range[1]}%"
             
-            # Gerar PDF
-            pdf_bytes = gerar_relatorio(df_filtrado, kpis, filtros_info)
+            # Carregar e processar dados da Jornada Empreendedora
+            jornada_dados = None
+            try:
+                df_trilha_report, df_mentoria_report = load_jornada_data()
+                if not df_trilha_report.empty or not df_mentoria_report.empty:
+                    jornada_dados = compute_jornada_metrics(
+                        df_filtrado, 
+                        df_trilha_report, 
+                        df_mentoria_report, 
+                        selected_municipios
+                    )
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ Dados da Jornada não disponíveis: {str(e)}")
+            
+            # Gerar PDF com todos os novos parâmetros
+            pdf_bytes = gerar_relatorio(
+                df_filtrado, 
+                kpis, 
+                filtros_info,
+                jornada_dados=jornada_dados,
+                status_info=status_info
+            )
             
             # Criar nome do arquivo com data/hora
             from datetime import datetime
@@ -747,6 +819,7 @@ with tab1:
             st.sidebar.error("❌ Biblioteca fpdf2 não encontrada. Instale com: pip install fpdf2")
         except Exception as e:
             st.sidebar.error(f"❌ Erro ao gerar relatório: {str(e)}")
+
     
     st.sidebar.markdown("---")
     

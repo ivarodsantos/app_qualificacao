@@ -6,6 +6,13 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
+# Import Streamlit for caching
+try:
+    import streamlit as st
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    STREAMLIT_AVAILABLE = False
+
 # Escopo de acesso: somente leitura da planilha
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
@@ -63,18 +70,21 @@ def extrair_id_planilha(link_planilha: str) -> str:
         raise ValueError(f"Não consegui extrair o ID da planilha. Verifique o link. Erro: {e}")
 
 
-def carregar_google_sheet_por_aba(
+# Wrapper interno para caching condicional
+def _carregar_google_sheet_cached(
     link_planilha: str,
     nome_aba: str,
-    intervalo: str = "A:Z"
+    intervalo: str = "A:Z",
+    ttl: int = 300
 ) -> pd.DataFrame:
     """
-    Lê dados de uma ABA específica da planilha e devolve um DataFrame do pandas.
-
+    Lê dados de uma ABA específica da planilha com cache Streamlit.
+    
     Parâmetros:
         link_planilha (str): link completo da planilha do Google Sheets
         nome_aba (str): nome EXATO da aba (como aparece lá embaixo no Sheets)
         intervalo (str): intervalo no formato A1 (ex.: 'A:Z', 'A1:K500', etc.)
+        ttl (int): tempo de vida do cache em segundos (padrão: 300 = 5 minutos)
 
     Retorno:
         pd.DataFrame com os dados lidos.
@@ -115,3 +125,36 @@ def carregar_google_sheet_por_aba(
     df_clean = df_clean[df_clean['CURSO'].str.strip() != '']  # Remove strings vazias/espaços
     
     return df_clean
+
+
+def carregar_google_sheet_por_aba(
+    link_planilha: str,
+    nome_aba: str,
+    intervalo: str = "A:Z",
+    ttl: int = 300,
+    use_cache: bool = True
+) -> pd.DataFrame:
+    """
+    Lê dados de uma ABA específica da planilha do Google Sheets.
+    
+    Parâmetros:
+        link_planilha (str): link completo da planilha do Google Sheets
+        nome_aba (str): nome EXATO da aba (como aparece lá embaixo no Sheets)
+        intervalo (str): intervalo no formato A1 (ex.: 'A:Z', 'A1:K500', etc.)
+        ttl (int): tempo de vida do cache em segundos (padrão: 300 = 5 minutos)
+                  Use 0 para desabilitar cache
+        use_cache (bool): se True, usa cache do Streamlit (padrão: True)
+
+    Retorno:
+        pd.DataFrame com os dados lidos.
+    """
+    # Se Streamlit não está disponível ou cache desabilitado, chama função sem cache
+    if not STREAMLIT_AVAILABLE or not use_cache or ttl == 0:
+        return _carregar_google_sheet_cached(link_planilha, nome_aba, intervalo, ttl)
+    
+    # Aplica cache dinamicamente usando st.cache_data
+    @st.cache_data(ttl=ttl, show_spinner=f"📥 Carregando dados do Google Sheets (aba: {nome_aba})...")
+    def _cached_load(link: str, aba: str, inter: str, _ttl: int):
+        return _carregar_google_sheet_cached(link, aba, inter, _ttl)
+    
+    return _cached_load(link_planilha, nome_aba, intervalo, ttl)

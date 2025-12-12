@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import os
 import unicodedata
+import numpy as np
 
 
 def sanitize_text(text):
@@ -48,6 +49,38 @@ def sanitize_text(text):
     return safe_text
 
 
+def calcular_estatisticas(df, coluna):
+    """
+    Calcula estatísticas descritivas para uma coluna numérica.
+    
+    Args:
+        df: DataFrame com os dados
+        coluna: Nome da coluna para calcular estatísticas
+    
+    Returns:
+        dict: Dicionário com estatísticas descritivas
+    """
+    if coluna not in df.columns:
+        return None
+    
+    dados = pd.to_numeric(df[coluna], errors='coerce').dropna()
+    
+    if dados.empty:
+        return None
+    
+    return {
+        'media': round(dados.mean(), 2),
+        'mediana': round(dados.median(), 2),
+        'desvio_padrao': round(dados.std(), 2),
+        'minimo': round(dados.min(), 2),
+        'maximo': round(dados.max(), 2),
+        'q1': round(dados.quantile(0.25), 2),
+        'q3': round(dados.quantile(0.75), 2),
+        'total': round(dados.sum(), 2),
+        'contagem': len(dados)
+    }
+
+
 # Cores da identidade visual Ceará Sem Fome
 class Cores:
     AZUL = (91, 155, 213)  # #5B9BD5
@@ -58,6 +91,7 @@ class Cores:
     CINZA_ESCURO = (95, 95, 95)  # #5F5F5F
     AZUL_ESCURO = (0, 51, 102)  # #003366 - original
     BRANCO = (255, 255, 255)
+    LARANJA = (255, 170, 0)  # #FFAA00 - Jornada Empreendedora
 
 
 class RelatorioPDF(FPDF):
@@ -326,8 +360,9 @@ class RelatorioPDF(FPDF):
             self.cell(0, 7, titulo, 0, 1)
             self.ln(2)
         
-        # Salvar imagem temporária
-        temp_img = 'temp_chart.png'
+        # Salvar imagem temporária com nome único para evitar conflitos
+        import time
+        temp_img = f'temp_chart_{int(time.time() * 1000000)}.png'
         with open(temp_img, 'wb') as f:
             f.write(img_bytes)
         
@@ -339,6 +374,310 @@ class RelatorioPDF(FPDF):
             os.remove(temp_img)
         
         self.ln(5)
+
+
+    def adicionar_estatisticas(self, df_filtrado):
+        """Adiciona seção de estatísticas descritivas ao PDF."""
+        self.set_font('Arial', 'B', 12)
+        self.set_text_color(*Cores.AZUL_ESCURO)
+        self.cell(0, 7, 'Analises Estatisticas', 0, 1)
+        self.ln(3)
+        
+        # Calcular estatísticas para CONCLUDENTES
+        stats_concludentes = calcular_estatisticas(df_filtrado, 'CONCLUDENTES')
+        stats_vagas = calcular_estatisticas(df_filtrado, 'VAGAS OFERTADAS')
+        stats_desistentes = calcular_estatisticas(df_filtrado, 'DESISTENTES')
+        
+        # Box de estatísticas
+        box_width = 60
+        box_height = 45
+        x_start = 15
+        y_start = self.get_y()
+        
+        stats_list = [
+            ('Concludentes', stats_concludentes, Cores.AZUL),
+            ('Vagas Ofertadas', stats_vagas, Cores.VERDE),
+            ('Desistentes', stats_desistentes, Cores.VERMELHO),
+        ]
+        
+        for idx, (titulo, stats, cor) in enumerate(stats_list):
+            if stats is None:
+                continue
+                
+            x = x_start + (idx * (box_width + 5))
+            y = y_start
+            
+            # Box colorido
+            self.set_fill_color(*cor)
+            self.set_draw_color(*cor)
+            self.rounded_rect(x, y, box_width, box_height, 3, 'DF')
+            
+            # Título
+            self.set_xy(x + 2, y + 2)
+            self.set_font('Arial', 'B', 9)
+            self.set_text_color(*Cores.BRANCO)
+            self.cell(box_width - 4, 5, sanitize_text(titulo), 0, 0)
+            
+            # Estatísticas
+            self.set_font('Arial', '', 7)
+            metrics = [
+                f"Media: {stats['media']:.1f}",
+                f"Mediana: {stats['mediana']:.1f}",
+                f"Desvio: {stats['desvio_padrao']:.1f}",
+                f"Min: {stats['minimo']:.0f} / Max: {stats['maximo']:.0f}",
+                f"Q1: {stats['q1']:.1f} / Q3: {stats['q3']:.1f}",
+            ]
+            
+            for i, metric in enumerate(metrics):
+                self.set_xy(x + 2, y + 9 + (i * 6))
+                self.cell(box_width - 4, 5, sanitize_text(metric), 0, 0)
+        
+        self.set_y(y_start + box_height + 10)
+        
+    def adicionar_kpis_estendidos(self, kpis, status_info=None):
+        """Adiciona seção de KPIs estendidos (sem INSCRITOS)."""
+        self.set_font('Arial', 'B', 12)
+        self.set_text_color(*Cores.AZUL_ESCURO)
+        self.cell(0, 7, 'Indicadores Principais', 0, 1)
+        self.ln(3)
+        
+        kpi_width = 60
+        kpi_height = 22
+        spacing = 5
+        x_start = 15
+        y_start = self.get_y()
+        
+        # KPIs principais (6 indicadores)
+        kpi_list = [
+            ('Total de Turmas', kpis.get('total_turmas', 0), Cores.AZUL),
+            ('Vagas Ofertadas', kpis.get('total_vagas', 0), Cores.AMARELO),
+            ('Total Concludentes', kpis.get('total_concludentes', 0), Cores.VERDE),
+            ('Total Desistentes', kpis.get('total_desistentes', 0), Cores.VERMELHO),
+            ('Taxa de Conclusao', f"{kpis.get('taxa_conclusao', 0):.1f}%", Cores.AZUL_ESCURO),
+            ('Taxa de Desistencia', f"{kpis.get('taxa_desistencia', 0):.1f}%", Cores.VERMELHO),
+        ]
+        
+        for idx, (label, valor, cor) in enumerate(kpi_list):
+            col = idx % 3
+            row = idx // 3
+            
+            x = x_start + (col * (kpi_width + spacing))
+            y = y_start + (row * (kpi_height + 5))
+            
+            self.set_xy(x, y)
+            
+            # Box colorido com cantos arredondados
+            self.set_fill_color(*cor)
+            self.set_draw_color(*cor)
+            self.set_line_width(0.5)
+            self.rounded_rect(x, y, kpi_width, kpi_height, 3, 'DF')
+            
+            # Label em branco
+            self.set_xy(x + 2, y + 2)
+            self.set_font('Arial', 'B', 8)
+            self.set_text_color(*Cores.BRANCO)
+            self.cell(kpi_width - 4, 5, sanitize_text(label), 0, 0)
+            
+            # Valor grande em branco
+            self.set_xy(x + 2, y + 10)
+            self.set_font('Arial', 'B', 14)
+            if isinstance(valor, (int, float)) and not isinstance(valor, str):
+                valor_fmt = f'{int(valor):,}'.replace(',', '.')
+            else:
+                valor_fmt = str(valor)
+            self.cell(kpi_width - 4, 8, valor_fmt, 0, 0)
+        
+        # Adicionar status operacional se disponível
+        if status_info:
+            y_status = y_start + (2 * (kpi_height + 5)) + 5
+            self.set_y(y_status)
+            self.ln(3)
+            
+            self.set_font('Arial', 'B', 10)
+            self.set_text_color(*Cores.AZUL_ESCURO)
+            self.cell(0, 6, 'Status Operacional:', 0, 1)
+            
+            self.set_font('Arial', '', 9)
+            self.set_text_color(*Cores.CINZA_ESCURO)
+            self.cell(0, 5, f"Turmas em Execucao: {status_info.get('em_execucao', 0)}", 0, 1)
+            self.cell(0, 5, f"Turmas Concluidas: {status_info.get('concluidas', 0)}", 0, 1)
+            self.cell(0, 5, f"Municipios Atendidos: {status_info.get('num_municipios', 0)}", 0, 1)
+            self.cell(0, 5, f"Executoras Ativas: {status_info.get('num_executoras', 0)}", 0, 1)
+        else:
+            self.set_y(y_start + (2 * (kpi_height + 5)) + 10)
+        
+        self.ln(5)
+
+    def adicionar_secao_projeto_parceiro(self, df_filtrado):
+        """Adiciona análise por Projeto e Parceiro."""
+        self.set_font('Arial', 'B', 12)
+        self.set_text_color(*Cores.AZUL_ESCURO)
+        self.cell(0, 7, 'Analise por Projeto e Parceiro', 0, 1)
+        self.ln(3)
+        
+        # Análise por Projeto
+        if 'PROJETO' in df_filtrado.columns:
+            resumo_projeto = (
+                df_filtrado.groupby('PROJETO')
+                .agg({
+                    'CURSO': 'count',
+                    'VAGAS OFERTADAS': 'sum',
+                    'CONCLUDENTES': 'sum'
+                })
+                .reset_index()
+            )
+            resumo_projeto.columns = ['Projeto', 'Turmas', 'Vagas', 'Concludentes']
+            resumo_projeto = resumo_projeto.sort_values('Concludentes', ascending=False).head(10)
+            
+            if not resumo_projeto.empty:
+                self.adicionar_tabela('Top 10 Projetos por Concludentes', resumo_projeto, max_linhas=10)
+        
+        # Análise por Parceiro
+        if 'PARCEIRO' in df_filtrado.columns:
+            resumo_parceiro = (
+                df_filtrado.groupby('PARCEIRO')
+                .agg({
+                    'CURSO': 'count',
+                    'VAGAS OFERTADAS': 'sum',
+                    'CONCLUDENTES': 'sum'
+                })
+                .reset_index()
+            )
+            resumo_parceiro.columns = ['Parceiro', 'Turmas', 'Vagas', 'Concludentes']
+            resumo_parceiro = resumo_parceiro.sort_values('Concludentes', ascending=False).head(10)
+            
+            if not resumo_parceiro.empty:
+                self.adicionar_tabela('Top 10 Parceiros por Concludentes', resumo_parceiro, max_linhas=10)
+    
+    def adicionar_secao_jornada(self, jornada_dados):
+        """Adiciona seção da Jornada Empreendedora ao PDF."""
+        if jornada_dados is None:
+            return
+            
+        self.set_font('Arial', 'B', 14)
+        self.set_text_color(*Cores.AZUL_ESCURO)
+        self.cell(0, 8, 'Jornada Empreendedora', 0, 1)
+        self.ln(2)
+        
+        self.set_font('Arial', '', 9)
+        self.set_text_color(*Cores.CINZA_ESCURO)
+        self.cell(0, 5, 'Acompanhamento: Sensibilizacao, Trilha Empreendedora e Mentoria SEBRAE', 0, 1)
+        self.ln(5)
+        
+        # Extrair KPIs da Jornada
+        kpis = jornada_dados.get('kpis', (0, 0, 0, 0, 0, 0))
+        kpi_qualificados, kpi_sensib, kpi_inscritos, kpi_concluintes_trilha, kpi_mentorados, taxa_conversao = kpis
+        
+        # KPIs da Jornada
+        kpi_width = 55
+        kpi_height = 20
+        x_start = 15
+        y_start = self.get_y()
+        
+        jornada_kpis = [
+            ('Qualificados', int(kpi_qualificados), Cores.AZUL),
+            ('Sensibilizados', int(kpi_sensib), Cores.AMARELO),
+            ('Concl. Trilha', int(kpi_concluintes_trilha), Cores.VERDE),
+            ('Mentorados', int(kpi_mentorados), Cores.LARANJA),
+        ]
+        
+        for idx, (label, valor, cor) in enumerate(jornada_kpis):
+            x = x_start + (idx * (kpi_width + 5))
+            y = y_start
+            
+            self.set_fill_color(*cor)
+            self.set_draw_color(*cor)
+            self.rounded_rect(x, y, kpi_width, kpi_height, 3, 'DF')
+            
+            self.set_xy(x + 2, y + 2)
+            self.set_font('Arial', 'B', 8)
+            self.set_text_color(*Cores.BRANCO)
+            self.cell(kpi_width - 4, 5, sanitize_text(label), 0, 0)
+            
+            self.set_xy(x + 2, y + 9)
+            self.set_font('Arial', 'B', 12)
+            self.cell(kpi_width - 4, 8, f'{valor:,}'.replace(',', '.'), 0, 0)
+        
+        self.set_y(y_start + kpi_height + 8)
+        
+        # Taxa de conversão
+        self.set_font('Arial', 'B', 10)
+        self.set_text_color(*Cores.AZUL_ESCURO)
+        self.cell(0, 6, f'Taxa de Conversao (Qualificados -> Mentorados): {taxa_conversao:.1f}%', 0, 1)
+        self.ln(5)
+        
+        # Funil de conversão como tabela
+        funnel_data = jornada_dados.get('funnel_data', None)
+        if funnel_data is not None and not funnel_data.empty:
+            self.set_font('Arial', 'B', 11)
+            self.set_text_color(*Cores.AZUL_ESCURO)
+            self.cell(0, 7, 'Funil de Conversao', 0, 1)
+            self.ln(2)
+            
+            # Desenhar barras do funil
+            max_val = funnel_data['Quantidade'].max() if funnel_data['Quantidade'].max() > 0 else 1
+            bar_max_width = 150
+            bar_height = 12
+            
+            cores_funil = [Cores.AZUL, Cores.AMARELO, Cores.VERDE, Cores.LARANJA]
+            
+            for idx, row in funnel_data.iterrows():
+                etapa = row['Etapa']
+                qtd = row['Quantidade']
+                bar_width = (qtd / max_val) * bar_max_width if max_val > 0 else 10
+                bar_width = max(bar_width, 20)  # Mínimo de 20 para visibilidade
+                
+                cor = cores_funil[idx % len(cores_funil)]
+                
+                y_bar = self.get_y()
+                
+                # Barra
+                self.set_fill_color(*cor)
+                self.rect(15, y_bar, bar_width, bar_height, 'F')
+                
+                # Texto da etapa e valor
+                self.set_xy(15 + bar_width + 5, y_bar + 2)
+                self.set_font('Arial', '', 9)
+                self.set_text_color(*Cores.CINZA_ESCURO)
+                self.cell(0, 8, f'{sanitize_text(etapa)}: {int(qtd):,}'.replace(',', '.'), 0, 0)
+                
+                self.set_y(y_bar + bar_height + 3)
+        
+        self.ln(5)
+        
+        # Top municípios comparativo
+        df_comparativo = jornada_dados.get('df_comparativo', None)
+        if df_comparativo is not None and not df_comparativo.empty:
+            top_mun = df_comparativo.nlargest(10, 'qtd_qualificacao')[['NM_MUN', 'qtd_qualificacao', 'qtd_mentoria']]
+            top_mun.columns = ['Municipio', 'Qualificados', 'Mentorados']
+            self.adicionar_tabela('Top 10 Municipios - Qualificacao vs Mentoria', top_mun, max_linhas=10)
+
+    def adicionar_secao_area_curso(self, df_filtrado, col_area='ÁREA DO CURSO (automático)'):
+        """Adiciona análise por área de qualificação."""
+        if col_area not in df_filtrado.columns:
+            # Tentar nome alternativo
+            col_area = 'ÁREA DO CURSO\n(automático)'
+            if col_area not in df_filtrado.columns:
+                return
+        
+        self.set_font('Arial', 'B', 12)
+        self.set_text_color(*Cores.AZUL_ESCURO)
+        self.cell(0, 7, 'Distribuicao por Area de Qualificacao', 0, 1)
+        self.ln(3)
+        
+        resumo_area = (
+            df_filtrado.groupby(col_area)
+            .agg({
+                'CURSO': 'count',
+                'CONCLUDENTES': 'sum'
+            })
+            .reset_index()
+        )
+        resumo_area.columns = ['Area', 'Turmas', 'Concludentes']
+        resumo_area = resumo_area.sort_values('Concludentes', ascending=False)
+        
+        if not resumo_area.empty:
+            self.adicionar_tabela('Resumo por Area', resumo_area, max_linhas=15)
 
 
 def gerar_grafico_barras(df, coluna_x, coluna_y, titulo, cor=Cores.AZUL, top_n=10):
@@ -449,14 +788,16 @@ def gerar_grafico_pizza(df, coluna_labels, coluna_valores, titulo, top_n=10):
     return img_bytes
 
 
-def gerar_relatorio(df_filtrado, kpis, filtros_aplicados=None):
+def gerar_relatorio(df_filtrado, kpis, filtros_aplicados=None, jornada_dados=None, status_info=None):
     """
-    Gera um relatório PDF completo com os dados filtrados.
+    Gera um relatório PDF completo e aprimorado com os dados filtrados.
     
     Args:
         df_filtrado: DataFrame com os dados filtrados
         kpis: Dicionário com os KPIs principais
         filtros_aplicados: Dicionário com os filtros aplicados (opcional)
+        jornada_dados: Dicionário com dados da Jornada Empreendedora (opcional)
+        status_info: Dicionário com informações de status operacional (opcional)
     
     Returns:
         bytes: Conteúdo do PDF em bytes para download
@@ -464,11 +805,24 @@ def gerar_relatorio(df_filtrado, kpis, filtros_aplicados=None):
     pdf = RelatorioPDF()
     pdf.add_page()
     
-    # Página 1: Metadados e KPIs
+    # =========================================================================
+    # PÁGINA 1: Sumário Executivo - Metadados e KPIs Estendidos
+    # =========================================================================
     pdf.adicionar_metadados(filtros_aplicados or {})
-    pdf.adicionar_kpis_coloridos(kpis)
+    pdf.adicionar_kpis_estendidos(kpis, status_info)
     
-    # Página 2: Análise por Cursos
+    # =========================================================================
+    # PÁGINA 2: Análises Estatísticas
+    # =========================================================================
+    pdf.add_page()
+    pdf.adicionar_estatisticas(df_filtrado)
+    
+    # Adicionar análise por área de qualificação na mesma página
+    pdf.adicionar_secao_area_curso(df_filtrado)
+    
+    # =========================================================================
+    # PÁGINA 3: Análise por Cursos
+    # =========================================================================
     pdf.add_page()
     
     if not df_filtrado.empty and 'CURSO' in df_filtrado.columns and 'CONCLUDENTES' in df_filtrado.columns:
@@ -491,9 +845,11 @@ def gerar_relatorio(df_filtrado, kpis, filtros_aplicados=None):
         
         # Tabela complementar
         top_cursos.columns = ['Curso', 'Concludentes']
-        pdf.adicionar_tabela('Dados Detalhados', top_cursos)
+        pdf.adicionar_tabela('Dados Detalhados - Top 10 Cursos', top_cursos)
     
-    # Página 3: Análise por Executoras
+    # =========================================================================
+    # PÁGINA 4: Análise por Executoras
+    # =========================================================================
     pdf.add_page()
     
     if not df_filtrado.empty and 'EXECUTORA' in df_filtrado.columns:
@@ -508,18 +864,30 @@ def gerar_relatorio(df_filtrado, kpis, filtros_aplicados=None):
         )
         resumo_exec.columns = ['Executora', 'Turmas', 'Vagas', 'Concludentes']
         
+        # Calcular taxa de conclusão por executora
+        resumo_exec['Taxa (%)'] = (resumo_exec['Concludentes'] / resumo_exec['Vagas'] * 100).round(1)
+        resumo_exec['Taxa (%)'] = resumo_exec['Taxa (%)'].fillna(0)
+        
         if not resumo_exec.empty:
             # Gráfico de pizza
             img_exec = gerar_grafico_pizza(
                 resumo_exec, 'Executora', 'Concludentes',
-                'Distribuição de Concludentes por Executora'
+                'Distribuicao de Concludentes por Executora'
             )
             pdf.adicionar_grafico(img_exec)
         
         # Tabela
         pdf.adicionar_tabela('Resumo por Executora', resumo_exec, max_linhas=20)
     
-    # Página 4: Análise por Municípios
+    # =========================================================================
+    # PÁGINA 5: Análise por Projeto e Parceiro
+    # =========================================================================
+    pdf.add_page()
+    pdf.adicionar_secao_projeto_parceiro(df_filtrado)
+    
+    # =========================================================================
+    # PÁGINA 6: Análise por Municípios
+    # =========================================================================
     pdf.add_page()
     
     if not df_filtrado.empty and 'Nome_Município' in df_filtrado.columns:
@@ -527,26 +895,33 @@ def gerar_relatorio(df_filtrado, kpis, filtros_aplicados=None):
             df_filtrado.groupby('Nome_Município')
             .agg({
                 'CURSO': 'count',
+                'VAGAS OFERTADAS': 'sum',
                 'CONCLUDENTES': 'sum'
             })
-            .sort_values('CONCLUDENTES', ascending=False)
-            .head(15)
             .reset_index()
         )
-        resumo_mun.columns = ['Município', 'Turmas', 'Concludentes']
+        resumo_mun.columns = ['Município', 'Turmas', 'Vagas', 'Concludentes']
+        resumo_mun = resumo_mun.sort_values('Concludentes', ascending=False).head(15)
         
         if not resumo_mun.empty:
             # Gráfico de barras
             img_mun = gerar_grafico_barras(
                 resumo_mun, 'Município', 'Concludentes',
-                'Top 15 Municípios por Concludentes',
+                'Top 15 Municipios por Concludentes',
                 cor=Cores.VERDE,
                 top_n=15
             )
             pdf.adicionar_grafico(img_mun)
         
         # Tabela
-        pdf.adicionar_tabela('Dados Detalhados', resumo_mun)
+        pdf.adicionar_tabela('Dados Detalhados - Municipios', resumo_mun)
+    
+    # =========================================================================
+    # PÁGINA 7: Jornada Empreendedora (se dados disponíveis)
+    # =========================================================================
+    if jornada_dados is not None:
+        pdf.add_page()
+        pdf.adicionar_secao_jornada(jornada_dados)
     
     # Retornar PDF como bytes
     return bytes(pdf.output())
