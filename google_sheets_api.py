@@ -26,8 +26,16 @@ def get_sheets_service():
     """
     creds = None
 
-    # Se já existir um token.json, tentamos reutilizar o login anterior
-    if os.path.exists("token.json"):
+    # 1. Tenta carregar dos Segredos do Streamlit (para Cloud)
+    if STREAMLIT_AVAILABLE and "google_oauth" in st.secrets:
+        try:
+            creds = Credentials.from_authorized_user_info(dict(st.secrets["google_oauth"]), SCOPES)
+        except Exception as e:
+            if STREAMLIT_AVAILABLE:
+                st.warning(f"Erro ao ler segredos: {e}")
+    
+    # 2. Se não deu certo (ou é local), tenta arquivo local token.json
+    if not creds and os.path.exists("token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
 
     # Se ainda não temos credenciais válidas, precisamos gerar/renovar
@@ -153,7 +161,7 @@ def carregar_google_sheet_por_aba(
         return _carregar_google_sheet_cached(link_planilha, nome_aba, intervalo, ttl)
     
     # Aplica cache dinamicamente usando st.cache_data
-    @st.cache_data(ttl=ttl, show_spinner=f"📥 Carregando dados do Google Sheets (aba: {nome_aba})...")
+    @st.cache_data(ttl=ttl, show_spinner=False)
     def _cached_load(link: str, aba: str, inter: str, _ttl: int):
         return _carregar_google_sheet_cached(link, aba, inter, _ttl)
     
