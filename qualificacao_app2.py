@@ -57,26 +57,41 @@ from acesso_planilha import carregar_google_sheet_aba
 from google_sheets_api import carregar_google_sheet_por_aba
 from tratamento_compilado import tratamento_compilado
 
-link = "https://docs.google.com/spreadsheets/d/1M2huy5RGW5D28zWRnBiHI4kSGWZNi5ejyygnxQjx7uo/edit?gid=0#gid=0"
-
-# Coloque aqui o NOME EXATO da aba, como aparece no Google Sheets
-nome_aba = "Compilado"  # exemplo; troque pelo nome real da aba
-intervalo = "A:AN"       # lê todas as colunas da aba; ajuste se quiser
-
-df = carregar_google_sheet_por_aba(link, nome_aba, intervalo)
-
-# Configurações iniciais do Streamlit
-# Configurações iniciais do Streamlit
+# Configurações iniciais do Streamlit (Deve ser o primeiro comando Streamlit)
 st.set_page_config(layout="wide", page_title="Ceará Sem Fome - Qualificação")
-
 
 # Função para carregar CSS externo
 def load_css(file_name):
     with open(file_name, encoding="utf-8") as f:
         st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
-# Carrega o CSS global
+# Carrega o CSS global (incluindo estilos do loader)
 load_css("styles.css")
+
+link = "https://docs.google.com/spreadsheets/d/1M2huy5RGW5D28zWRnBiHI4kSGWZNi5ejyygnxQjx7uo/edit?gid=0#gid=0"
+# Coloque aqui o NOME EXATO da aba, como aparece no Google Sheets
+nome_aba = "Compilado"  # exemplo; troque pelo nome real da aba
+intervalo = "A:AN"       # lê todas as colunas da aba; ajuste se quiser
+
+# --- LOADING SCREEN PERSONALIZADA ---
+loader_placeholder = st.empty()
+with loader_placeholder.container():
+    st.markdown("""
+        <div class="custom-loader-container">
+            <div class="loader-spinner"></div>
+            <div class="loader-text">Carregando Dados do Monitoramento...</div>
+            <div class="loader-subtext">Sincronizando com Google Sheets | Ceará Sem Fome</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+try:
+    df = carregar_google_sheet_por_aba(link, nome_aba, intervalo)
+except Exception as e:
+    st.error(f"Erro ao carregar dados: {e}")
+    df = pd.DataFrame()
+
+# Remove o loader após o carregamento
+loader_placeholder.empty()
 
 # Função para converter imagem para base64
 def get_base64_of_bin_file(bin_file):

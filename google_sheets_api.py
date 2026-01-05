@@ -27,12 +27,15 @@ def get_sheets_service():
     creds = None
 
     # 1. Tenta carregar dos Segredos do Streamlit (para Cloud)
-    if STREAMLIT_AVAILABLE and "google_oauth" in st.secrets:
+    # 1. Tenta carregar dos Segredos do Streamlit (para Cloud)
+    if STREAMLIT_AVAILABLE:
         try:
-            creds = Credentials.from_authorized_user_info(dict(st.secrets["google_oauth"]), SCOPES)
+            # Verifica existência sem quebrar
+            if "google_oauth" in st.secrets:
+                creds = Credentials.from_authorized_user_info(dict(st.secrets["google_oauth"]), SCOPES)
         except Exception as e:
-            if STREAMLIT_AVAILABLE:
-                st.warning(f"Erro ao ler segredos: {e}")
+            # Ignora erro de secrets não encontrados e segue para método local
+            pass
     
     # 2. Se não deu certo (ou é local), tenta arquivo local token.json
     if not creds and os.path.exists("token.json"):
@@ -42,8 +45,13 @@ def get_sheets_service():
     if not creds or not creds.valid:
         # Caso as credenciais existam, mas estejam expiradas, tenta renovar
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except Exception:
+                # Se falhar ao renovar (ex: token revogado), força nova autenticação
+                creds = None
+
+        if not creds:
             # Fluxo de autenticação baseado no arquivo credentials.json
             flow = InstalledAppFlow.from_client_secrets_file(
                 "credentials.json",  # arquivo baixado do Google Cloud
